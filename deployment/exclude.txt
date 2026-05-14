@@ -1,0 +1,12 @@
+\deployment\
+\.git\
+\__pycache__\
+\.pytest_cache\
+\tests\
+\docs\
+\build\
+\dist\
+\installer_output\
+.gitignore
+cleanup.bat
+UniversalTranslator.spec

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller output
+installer_output/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Tests cache
+.pytest_cache/
+pytest-cache-files-*/
+htmlcov/
+.coverage
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# App runtime data (stored in %APPDATA%)
+config/
+
+# RAG / large model files
+RAG/
+
+# Archive (old code)
+archive/
+
+# Antigravity AI assistant
+.antigravity*
