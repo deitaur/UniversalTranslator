@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ru" class="scroll-smooth bg-black">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Translator | Ночной Нью-Йорк</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                    colors: {
+                        nyBg: '#020205',
+                        nySurface: '#0A0A10',
+                        nyBorder: '#1A1A24',
+                        neonPink: '#FF0055',
+                        neonCyan: '#00F0FF',
+                        neonPurple: '#B026FF',
+                        neonYellow: '#FFD700'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+            background-color: #020205;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+
+        .text-gradient-gray {
+            background: linear-gradient(180deg, #F3F4F6 0%, #9CA3AF 50%, #4B5563 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .text-gradient-silver {
+            background: linear-gradient(to right, #D1D5DB, #6B7280);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .vignette {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            pointer-events: none;
+            background: radial-gradient(circle at 50% 50%, transparent 20%, rgba(0, 0, 0, 0.95) 100%);
+        }
+
+        .center-flicker {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 0;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.03) 0%, transparent 50%);
+            animation: flicker-anim 5s infinite alternate;
+        }
+
+        @keyframes flicker-anim {
+            0% {
+                opacity: 0.8;
+            }
+
+            10% {
+                opacity: 0.9;
+            }
+
+            12% {
+                opacity: 0.5;
+            }
+
+            14% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+
+            55% {
+                opacity: 0.8;
+            }
+
+            100% {
+                opacity: 0.6;
+            }
+        }
+
+        .cursor-light {
+            position: fixed;
+            width: 800px;
+            height: 800px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.06) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 5;
+            top: -400px;
+            left: -400px;
+            will-change: transform;
+        }
+
+        /* Клавиши */
+        kbd {
+            background-color: #05050A;
+            border: 1px solid theme('colors.nyBorder');
+            border-bottom-color: #4B5563;
+            border-radius: 0.4rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8em;
+            color: #9CA3AF;
+            font-family: 'JetBrains Mono', monospace;
+            display: inline-block;
+            transform: translateY(-2px);
+            transition: all 0.15s;
+        }
+
+        @media (min-width: 640px) {
+            kbd {
+                padding: 0.25rem 0.6rem;
+                font-size: 0.85em;
+            }
+        }
+
+        kbd.pressed {
+            transform: translateY(1px) !important;
+            border-bottom-color: theme('colors.neonCyan') !important;
+            color: theme('colors.neonCyan') !important;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.2) inset, 0 0 10px rgba(0, 240, 255, 0.2) !important;
+            background-color: #0A0A10 !important;
+        }
+
+        .fade-up {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 1s ease-out, transform 1s ease-out;
+        }
+
+        .fade-up.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .carousel-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #374151;
+            transition: all 0.4s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .carousel-dot::after {
+            content: '';
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            bottom: -10px;
+            left: -10px;
+        }
+
+        .carousel-dot.active {
+            background-color: theme('colors.neonCyan');
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
+            width: 36px;
+            border-radius: 8px;
+        }
+
+        @keyframes subtle-pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.8;
+                transform: scale(0.98);
+            }
+        }
+
+        .animate-subtle-pulse {
+            animation: subtle-pulse 2s infinite ease-in-out;
+            cursor: pointer;
+        }
+
+        ::selection {
+            background: #374151;
+            color: #fff;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #020205;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #1A1A24;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4B5563;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col font-sans bg-nyBg text-gray-300 relative">
+
+    <div class="vignette"></div>
+    <div class="center-flicker"></div>
+    <div class="cursor-light" id="cursorLight"></div>
+
+    <nav class="fixed w-full top-0 z-50 bg-black/40 backdrop-blur-md border-b border-white/5">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3 font-bold text-gray-200 text-base sm:text-lg tracking-tight z-50">
+                <div
+                    class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-black border border-gray-700 flex items-center justify-center font-bold text-xs sm:text-sm text-gray-400">
+                    U</div>
+                <span class="text-gradient-silver hidden sm:inline">Universal Translator</span>
+            </div>
+            <a href="#download"
+                class="relative z-50 text-xs sm:text-sm bg-black/50 border border-gray-800 text-gray-400 px-5 sm:px-6 py-2 sm:py-2.5 rounded-full font-medium hover:border-gray-500 hover:text-gray-200 transition-all duration-300">
+                Скачать
+            </a>
+        </div>
+    </nav>
+
+    <main class="flex-grow pt-32 sm:pt-48 pb-16 sm:pb-20 px-4 sm:px-6 relative z-10">
+        <div class="max-w-4xl mx-auto text-center fade-up visible relative z-20">
+
+            <h1
+                class="text-4xl sm:text-5xl md:text-7xl font-extrabold tracking-tight mb-6 sm:mb-8 leading-[1.1] text-gradient-gray">
+                Понимайте любой текст. <br class="hidden sm:block">
+                <span class="text-gray-500">Не теряя фокус.</span>
+            </h1>
+
+            <p
+                class="text-lg sm:text-xl text-gray-500 mb-10 sm:mb-12 max-w-2xl mx-auto font-light leading-relaxed px-2">
+                ИИ-ассистент, живущий в трее. Мгновенно переводит, улучшает текст и работает в любом окне. Никаких
+                лишних вкладок.
+            </p>
+
+            <!-- Интерактивное демо -->
+            <div class="max-w-2xl mx-auto bg-black/80 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-5 sm:p-8 shadow-2xl relative group"
+                id="demo-container">
+                <div
+                    class="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-gray-500 to-transparent opacity-20 rounded-t-2xl">
+                </div>
+
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-2">
+                        <div class="w-2.5 h-2.5 rounded-full bg-gray-800"></div>
+                        <div class="w-2.5 h-2.5 rounded-full bg-gray-800"></div>
+                        <div class="w-2.5 h-2.5 rounded-full bg-gray-800"></div>
+                        <p class="ml-2 text-[10px] sm:text-xs text-gray-600 font-mono uppercase tracking-widest">Live
+                            Demo: <span id="demo-title-display" class="text-gray-300 font-bold"></span></p>
+                    </div>
+                </div>
+
+                <div
+                    class="text-left text-base sm:text-lg md:text-xl leading-relaxed text-gray-400 font-medium font-mono relative min-h-[140px] flex flex-col justify-center">
+                    <div>
+                        <span id="demo-text"
+                            class="transition-all duration-700 ease-in-out px-1 rounded inline-block"></span>
+                        <span class="animate-pulse text-gray-500" id="demo-cursor">_</span>
+                    </div>
+
+                    <!-- Всплывающее окно (Smart Popup) - теперь в потоке документа, чтобы не обрезаться -->
+                    <div id="demo-popup"
+                        class="relative mt-4 bg-[#11111A] border border-gray-600 rounded-lg p-3 sm:p-4 shadow-[0_0_30px_rgba(0,0,0,0.9)] opacity-0 transition-all duration-500 z-10 w-full font-sans hidden">
+                        <div class="flex items-center gap-2 mb-2 border-b border-gray-700/50 pb-2">
+                            <span class="w-2 h-2 rounded-full bg-neonCyan shadow-[0_0_8px_rgba(0,240,255,0.8)]"></span>
+                            <span
+                                class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-widest uppercase">Universal
+                                Translator</span>
+                        </div>
+                        <span id="demo-popup-text" class="text-gray-200 text-sm sm:text-lg block"></span>
+                    </div>
+                </div>
+
+                <div id="tooltip"
+                    class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/90 border border-gray-700 text-gray-300 px-4 py-2 rounded-lg text-xs sm:text-sm opacity-0 transition-opacity duration-500 flex items-center gap-3 font-mono shadow-xl backdrop-blur-md z-10 whitespace-nowrap pointer-events-none">
+                    <svg class="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                        viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                    <span id="tooltip-text">PROCESSING</span>
+                </div>
+            </div>
+
+            <!-- Блок с клавишами и кнопкой "Далее" -->
+            <div id="demo-keys-container"
+                class="flex flex-wrap items-center justify-center w-full max-w-2xl mx-auto gap-x-2 gap-y-2 text-gray-400 text-sm sm:text-base mt-6 sm:mt-8 font-mono min-h-[50px] px-4 py-2 rounded-xl border border-gray-800/50 bg-black/30 transition-all duration-300 select-none">
+                <!-- Заполняется через JS -->
+            </div>
+
+            <div class="flex items-center justify-center gap-5 mt-8 sm:mt-10" id="carousel-dots">
+                <!-- Заполняется через JS -->
+            </div>
+        </div>
+    </main>
+
+    <section class="py-16 sm:py-24 px-4 sm:px-6 relative z-10 border-t border-white/5 bg-nySurface/20 mt-6 sm:mt-10">
+        <div class="max-w-5xl mx-auto">
+
+            <div class="text-center mb-12 sm:mb-16 fade-up">
+                <h2 class="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 text-gradient-gray">Ваше время стоит дороже
+                </h2>
+                <p class="text-base sm:text-lg text-gray-500 max-w-2xl mx-auto px-2">
+                    Замените рутинное переключение между окнами на глобальные шорткаты.<br class="hidden sm:block">
+                    Ускорение процесса в <span class="text-gray-300 font-bold">5 раз</span> без потери фокуса.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 mb-16 sm:mb-20 fade-up">
+                <div class="bg-[#050508] border border-gray-800/50 rounded-2xl p-6 sm:p-8 opacity-60">
+                    <div class="flex items-center justify-between mb-6 sm:mb-8 pb-4 border-b border-gray-800/50">
+                        <span class="text-gray-500 font-mono text-xs sm:text-sm uppercase tracking-wider">Обычный
+                            процесс</span>
+                        <span class="text-gray-600 font-mono text-xs sm:text-sm">~ 10 сек</span>
+                    </div>
+                    <div class="space-y-3 sm:space-y-4 text-xs sm:text-sm text-gray-500">
+                        <div class="flex items-center gap-3 sm:gap-4"><kbd>Ctrl+C</kbd> <span>Скопировать оригинальный
+                                текст</span></div>
+                        <div class="flex items-center gap-3 sm:gap-4"><kbd>Alt+Tab</kbd> <span>Переключиться в
+                                переводчик</span></div>
+                        <div class="flex items-center gap-3 sm:gap-4"><kbd>Ctrl+V</kbd> <span>Вставить текст для
+                                перевода</span></div>
+                        <div class="flex items-center gap-3 sm:gap-4"><kbd>Ctrl+C</kbd> <span>Скопировать
+                                результат</span></div>
+                        <div class="flex items-center gap-3 sm:gap-4"><kbd>Alt+Tab</kbd> <span>Вернуться в рабочее
+                                окно</span></div>
+                        <div class="flex items-center gap-3 sm:gap-4"><kbd>Ctrl+V</kbd> <span>Вставить переведенный
+                                текст</span></div>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-nySurface/50 border border-gray-700 rounded-2xl p-6 sm:p-8 relative overflow-hidden shadow-[0_0_30px_rgba(255,255,255,0.03)]">
+                    <div
+                        class="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-gray-400 to-transparent opacity-20">
+                    </div>
+
+                    <div class="flex items-center justify-between mb-6 sm:mb-8 pb-4 border-b border-gray-700/50">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></span>
+                            <span class="text-gray-300 font-mono text-xs sm:text-sm uppercase tracking-wider">С
+                                Universal Translator</span>
+                        </div>
+                        <span class="text-gray-300 font-mono text-xs sm:text-sm font-bold">~ 2 сек</span>
+                    </div>
+
+                    <div class="flex flex-col justify-center h-full pb-6 sm:pb-8 gap-6 sm:gap-8">
+                        <div class="flex items-center gap-4 sm:gap-5 text-gray-400 text-base sm:text-lg">
+                            <div
+                                class="w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full bg-[#050508] border border-gray-800 flex items-center justify-center text-xs sm:text-sm font-mono">
+                                1</div>
+                            <span>Выделить текст</span>
+                        </div>
+
+                        <div class="flex items-center gap-4 sm:gap-5 text-gray-200 text-lg sm:text-xl font-medium">
+                            <div
+                                class="w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full bg-[#050508] border border-gray-500 flex items-center justify-center shadow-[0_0_15px_rgba(255,255,255,0.1)] text-xs sm:text-sm font-mono">
+                                2</div>
+                            <span class="flex items-center flex-wrap gap-2">Нажать <kbd
+                                    class="text-sm sm:text-lg">Ctrl+Alt+R</kbd></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fade-up">
+                <h3
+                    class="text-sm sm:text-lg font-bold text-center mb-6 sm:mb-8 text-gray-500 font-mono uppercase tracking-widest">
+                    Весь арсенал под рукой</h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                    <div
+                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd
+                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
+                                Alt + R</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">In-place Замена</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Мгновенно заменяет выделенный текст
+                            на перевод прямо в активном окне.</p>
+                    </div>
+                    <div
+                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd
+                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
+                                Alt + T</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Smart Popup</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Отображает элегантное всплывающее
+                            окно с переводом поверх всех программ.</p>
+                    </div>
+                    <div
+                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd
+                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
+                                Alt + Y</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Фоновый Буфер</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Незаметно переводит последнее
+                            скопированное содержимое буфера обмена.</p>
+                    </div>
+                    <div
+                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd
+                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
+                                Alt + N</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">ИИ-Переговорщик</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Переписывает текст в дипломатичном и
+                            уверенном корпоративном тоне.</p>
+                    </div>
+                    <div
+                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd
+                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
+                                Alt + E</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">ИИ-Учитель</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Анализирует грамматику и предлагает
+                            продвинутые native-like формулировки.</p>
+                    </div>
+                    <div
+                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group border-dashed opacity-70">
+                        <div class="mb-4 inline-block"><kbd
+                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
+                                Alt + W</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Whisper Voice</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Голосовой ввод. Диктуйте текст, а ИИ
+                            сам расставит знаки препинания.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="download" class="py-20 sm:py-32 px-4 sm:px-6 relative z-20">
+        <div class="max-w-3xl mx-auto text-center fade-up">
+            <div
+                class="bg-nySurface/50 border border-gray-800 rounded-3xl p-8 sm:p-12 md:p-20 relative overflow-hidden backdrop-blur-md">
+                <h2
+                    class="text-2xl sm:text-3xl md:text-5xl font-extrabold mb-4 sm:mb-6 text-gradient-gray relative z-10">
+                    Готовы к апгрейду?</h2>
+                <p class="text-sm sm:text-lg text-gray-500 mb-8 sm:mb-10 relative z-10 px-2">Работает абсолютно
+                    незаметно. Потребляет минимум ресурсов.</p>
+                <div class="relative z-10">
+                    <a href="Untranslator.exe" download
+                        class="inline-block text-center bg-gray-200 text-black px-6 sm:px-10 py-4 sm:py-5 rounded-xl font-bold text-base sm:text-lg transition-all duration-300 w-full sm:w-auto hover:bg-white hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:-translate-y-1">
+                        Скачать для Windows
+                    </a>
+                </div>
+                <p class="mt-6 sm:mt-8 text-xs sm:text-sm text-gray-600 font-mono opacity-70 relative z-10">
+                    v 3.2 • Win 10/11
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <footer class="py-12 px-4 sm:px-6 border-t border-white/5 bg-black relative z-20">
+        <div class="max-w-3xl mx-auto text-center">
+            <!-- Блок сухой выжимки -->
+            <div class="mb-8 p-6 rounded-xl border border-gray-800/50 bg-[#050508] text-left sm:text-center shadow-lg">
+                <h4 class="text-neonCyan font-mono text-xs uppercase tracking-widest mb-3">TL;DR / Техническая суть</h4>
+                <p class="text-gray-400 text-sm sm:text-base leading-relaxed">
+                    Утилита для Windows, живущая в трее. Переводит, корректирует и переписывает текст <strong
+                        class="text-gray-200 font-medium">напрямую в активном окне</strong> (IDE, мессенджер, браузер)
+                    по глобальным шорткатам. <br class="hidden sm:block">
+                    Полностью исключает копипасту, открытие дополнительных вкладок и потерю фокуса.
+                </p>
+            </div>
+
+            <p class="text-gray-600 text-xs sm:text-sm font-mono">&copy; 2026 Universal Translator. Built for the
+                shadows.</p>
+        </div>
+    </footer>
+
+    <script>
+        const observerOptions = { threshold: 0.1, rootMargin: "0px 0px -50px 0px" };
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.classList.add('visible');
+            });
+        }, observerOptions);
+        document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+        const demos = [
+            {
+                title: "In-place Замена",
+                keys: ["Ctrl", "Alt", "R"], targetKey: "r",
+                content: [
+                    { orig: "I think we should reconsider the architecture.", res: "Думаю, нам стоит пересмотреть архитектуру." },
+                    { orig: "The server is currently experiencing high load.", res: "В данный момент сервер испытывает высокую нагрузку." }
+                ],
+                processText: "TRANSLATING", type: "replace"
+            },
+            {
+                title: "Smart Popup",
+                keys: ["Ctrl", "Alt", "T"], targetKey: "t",
+                content: [
+                    { orig: "Can you send the report by tomorrow?", res: "Можешь прислать отчет до завтра?" },
+                    { orig: "What time is the daily standup meeting?", res: "Во сколько у нас ежедневный стендап?" }
+                ],
+                processText: "TRANSLATING", type: "popup"
+            },
+            {
+                title: "ИИ-Переговорщик",
+                keys: ["Ctrl", "Alt", "N"], targetKey: "n",
+                content: [
+                    { orig: "Fix this bug immediately, it's completely broken.", res: "Could you please take a look at this issue? It seems to be affecting functionality." },
+                    { orig: "I don't have time for this nonsense.", res: "I am currently occupied with other priorities, but let's schedule a time to discuss this." }
+                ],
+                processText: "REWRITING", type: "replace"
+            },
+            {
+                title: "ИИ-Учитель",
+                keys: ["Ctrl", "Alt", "E"], targetKey: "e",
+                content: [
+                    { orig: "He don't know nothing about it.", res: "He doesn't know anything about it. (Corrected)" },
+                    { orig: "I am working here since 5 years.", res: "I have been working here for 5 years. (Corrected Tense)" }
+                ],
+                processText: "ANALYZING", type: "replace"
+            }
+        ];
+
+        let currentSlide = 0;
+        let currentRound = 0; // Добавлено для отслеживания кругов
+        let activeTimeouts = [];
+        let isProcessing = false;
+
+        const demoTitle = document.getElementById('demo-title-display');
+        const demoText = document.getElementById('demo-text');
+        const tooltip = document.getElementById('tooltip');
+        const tooltipText = document.getElementById('tooltip-text');
+        const keysContainer = document.getElementById('demo-keys-container');
+        const dotsContainer = document.getElementById('carousel-dots');
+        const demoPopup = document.getElementById('demo-popup');
+        const demoPopupText = document.getElementById('demo-popup-text');
+
+        function schedule(fn, delay) {
+            const id = setTimeout(fn, delay);
+            activeTimeouts.push(id);
+            return id;
+        }
+
+        function cancelAllAnimations() {
+            activeTimeouts.forEach(clearTimeout);
+            activeTimeouts = [];
+        }
+
+        function initCarousel() {
+            dotsContainer.innerHTML = '';
+            demos.forEach((_, index) => {
+                const dot = document.createElement('div');
+                dot.className = `carousel-dot ${index === 0 ? 'active' : ''}`;
+                dot.addEventListener('click', () => { if (currentSlide !== index) goToSlide(index); });
+                dotsContainer.appendChild(dot);
+            });
+            renderSlideData();
+        }
+
+        function updateDots() {
+            document.querySelectorAll('.carousel-dot').forEach((dot, index) => {
+                dot.classList.toggle('active', index === currentSlide);
+            });
+        }
+
+        function renderSlideData() {
+            const data = demos[currentSlide];
+            const content = data.content[currentRound % data.content.length];
+
+            demoTitle.innerText = data.title;
+            demoText.innerText = content.orig;
+            tooltipText.innerText = data.processText;
+
+            // Подготавливаем текст (подсветка выделения)
+            demoText.style.backgroundColor = 'rgba(75, 85, 99, 0.25)';
+            demoText.style.color = '#E5E7EB';
+            demoText.style.opacity = '1';
+
+            demoPopup.style.opacity = '0';
+            demoPopup.style.display = 'none';
+            tooltip.style.opacity = '0';
+            isProcessing = false;
+
+            // Сбрасываем стили контейнера кнопок для клика
+            keysContainer.className = "flex w-full max-w-2xl mx-auto flex-wrap items-center justify-center gap-x-2 gap-y-2 text-gray-400 text-sm sm:text-base mt-6 sm:mt-8 font-mono min-h-[50px] px-4 py-2 rounded-xl border border-gray-800/50 bg-black/30 transition-all duration-300 select-none cursor-pointer hover:bg-black/50 animate-subtle-pulse";
+
+            // Текст-призыв со стрелками
+            keysContainer.innerHTML = `<span class="text-neonCyan text-lg sm:text-xl font-bold">►</span> <span class="text-gray-300 font-bold mx-2 sm:mx-3 uppercase text-[10px] sm:text-xs tracking-widest text-center">Нажмите здесь</span>`;
+            data.keys.forEach((key, i) => {
+                keysContainer.innerHTML += `<kbd id="key-${i}">${key}</kbd>`;
+                if (i < data.keys.length - 1) keysContainer.innerHTML += `<span class="text-gray-700 mx-1">+</span>`;
+            });
+            keysContainer.innerHTML += `<span class="text-neonCyan text-lg sm:text-xl font-bold ml-2 sm:ml-3">◄</span>`;
+
+            // Добавляем обработчик на сам контейнер для удобства (если он был удален)
+            keysContainer.onclick = triggerSuccess;
+        }
+
+        function goToSlide(index) {
+            cancelAllAnimations();
+            currentSlide = index;
+            updateDots();
+            renderSlideData();
+        }
+
+        function nextSlide() {
+            currentSlide++;
+            if (currentSlide >= demos.length) {
+                currentSlide = 0;
+                currentRound++; // Увеличиваем круг после прохождения всех слайдов
+            }
+            goToSlide(currentSlide);
+        }
+
+        function triggerSuccess() {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            cancelAllAnimations();
+            const data = demos[currentSlide];
+            const content = data.content[currentRound % data.content.length];
+
+            // Убираем возможность кликать и отключаем пульсацию
+            keysContainer.classList.remove('animate-subtle-pulse', 'cursor-pointer', 'hover:bg-black/50');
+            keysContainer.onclick = null;
+
+            // Визуально нажимаем клавиши
+            document.querySelectorAll('kbd').forEach(k => k.classList.add('pressed'));
+            schedule(() => document.querySelectorAll('kbd').forEach(k => k.classList.remove('pressed')), 200);
+
+            // Показываем PROCESSING
+            tooltip.style.opacity = '1';
+            demoText.style.opacity = '0.4';
+
+            // Имитация работы
+            schedule(() => {
+                tooltip.style.opacity = '0';
+
+                // Выдаем результат
+                if (data.type === 'replace') {
+                    demoText.innerText = content.res;
+                    demoText.style.opacity = '1';
+                    demoText.style.backgroundColor = 'transparent';
+                    demoText.style.color = '#9CA3AF';
+                } else if (data.type === 'popup') {
+                    demoText.style.opacity = '1';
+                    demoPopupText.innerText = content.res;
+                    demoPopup.style.display = 'block';
+                    setTimeout(() => demoPopup.style.opacity = '1', 50);
+                }
+
+                // СРАЗУ меняем нижнюю панель на сдержанный дизайн с подготовленной кнопкой
+                let keysHtml = '';
+                data.keys.forEach((key, i) => {
+                    keysHtml += `<kbd class="border-gray-700 text-gray-600 bg-transparent shadow-none">${key}</kbd>`;
+                    if (i < data.keys.length - 1) keysHtml += `<span class="text-gray-800 mx-1">+</span>`;
+                });
+
+                keysContainer.className = "flex w-full max-w-2xl mx-auto items-center justify-between mt-6 sm:mt-8 font-mono min-h-[50px] px-4 py-2 rounded-xl border border-transparent transition-all duration-300 select-none";
+
+                keysContainer.innerHTML = `
+                    <div class="flex items-center opacity-50 transform scale-95 transition-all">
+                        ${keysHtml}
+                    </div>
+                    <button id="btn-next" class="flex items-center gap-2 text-gray-600 hover:text-gray-300 transition-all opacity-0 pointer-events-none px-4 py-2 rounded-lg border border-transparent hover:border-gray-800 hover:bg-gray-800/30">
+                        Далее <span class="text-lg">➔</span>
+                    </button>
+                `;
+
+                // Ждем 2 секунды перед тем, как показать неяркую кнопку "Далее"
+                schedule(() => {
+                    const btnNext = document.getElementById('btn-next');
+                    if (btnNext) {
+                        btnNext.style.opacity = '1';
+                        btnNext.style.pointerEvents = 'auto';
+                        btnNext.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            demoText.style.opacity = '0';
+                            demoPopup.style.opacity = '0';
+                            schedule(nextSlide, 300);
+                        });
+                    }
+                }, 2000);
+
+            }, 1200);
+        }
+
+        // Шорткаты с клавиатуры
+        window.addEventListener('keydown', (e) => {
+            const data = demos[currentSlide];
+            if (e.ctrlKey && e.altKey && e.key.toLowerCase() === data.targetKey) {
+                e.preventDefault();
+                triggerSuccess();
+            }
+        });
+
+        initCarousel();
+
+        // Свечение за курсором
+        const cursorLight = document.getElementById('cursorLight');
+        let mouseX = window.innerWidth / 2;
+        let mouseY = window.innerHeight / 2;
+        let lightX = mouseX;
+        let lightY = mouseY;
+
+        function updateLightPosition(e) {
+            mouseX = e.clientX || (e.touches && e.touches[0].clientX);
+            mouseY = e.clientY || (e.touches && e.touches[0].clientY);
+        }
+
+        window.addEventListener('mousemove', updateLightPosition);
+        window.addEventListener('touchmove', updateLightPosition, { passive: true });
+
+        function animateCursorLight() {
+            lightX += (mouseX - lightX) * 0.05;
+            lightY += (mouseY - lightY) * 0.05;
+            cursorLight.style.transform = `translate3d(${lightX}px, ${lightY}px, 0)`;
+            requestAnimationFrame(animateCursorLight);
+        }
+        animateCursorLight();
+    </script>
+</body>
+
+</html>
