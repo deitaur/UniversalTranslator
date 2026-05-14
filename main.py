@@ -111,10 +111,6 @@ def _grab_selected_text():
 
 def on_hotkey_replace():
     log.debug("on_hotkey_replace called")
-    # Check if cursor is in an editable field FIRST, before Ctrl+C changes focus
-    editable = has_caret()
-    log.debug("has_caret() => %s", editable)
-
     text = _grab_selected_text()
     if not text.strip():
         log.debug("No text selected, skipping")
@@ -126,23 +122,10 @@ def on_hotkey_replace():
         log.warning("Translation returned empty")
         return
 
-    # Always copy to clipboard
     set_clipboard_text(translated)
     log.debug("Translation set to clipboard (%d chars)", len(translated))
-
-    if editable:
-        # In an editable field → paste translation in place
-        if config.get("direct_type", False):
-            type_unicode_text(translated)
-        else:
-            send_ctrl_v()
-        show_toast("Translated", 1500)
-    else:
-        # Not editable (website, PDF, etc.) → show full translation popup
-        word_count = len(translated.split())
-        duration = max(3000, min(15000, word_count * 400))
-        log.info("Showing translation toast (%d words, %dms)", word_count, duration)
-        show_translation_toast(translated, duration)
+    send_ctrl_v()
+    show_toast("✓", 800)
 
 
 def on_hotkey_popup():
