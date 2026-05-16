@@ -5,7 +5,6 @@ Reuses the Whisper model cache and status-window from whisper.py.
 """
 
 import datetime
-import os
 import threading
 import time
 from pathlib import Path
@@ -55,68 +54,13 @@ def _build_content(text: str) -> str:
 
 
 def _show_saved_popup(filepath: Path, text: str):
-    """Small result window near cursor: filename + preview + Open buttons."""
-    import customtkinter as ctk
-    from services.ai.whisper import _pipe_win as _pw
-
-    # Re-read module var — may have changed since import
-    import services.ai.whisper as _wmod
-    win = _wmod._pipe_win
-    if win is None:
+    """Show save-confirmation in the HUD overlay."""
+    from ui.hud import get_pipe_hud
+    hud = get_pipe_hud()
+    if hud is None:
         return
-
     preview = text[:120].rstrip() + ("…" if len(text) > 120 else "")
-
-    def _u():
-        try:
-            win._blink_active = False
-            win._timer_active = False
-            win._icon.configure(text="✓", text_color="#a6e3a1")
-            win._status.configure(text=f"Сохранено: {filepath.name}", text_color="#a6e3a1")
-            win._timer.configure(text="")
-
-            win._result.configure(text=preview)
-            win._result.pack(fill="x", padx=10, pady=(2, 4))
-
-            # Open-file button
-            def _open_file():
-                try:
-                    os.startfile(str(filepath))
-                except Exception:
-                    pass
-
-            def _open_folder():
-                try:
-                    os.startfile(str(filepath.parent))
-                except Exception:
-                    pass
-
-            btn_frame = ctk.CTkFrame(win._result.master, fg_color="transparent")
-            btn_frame.pack(fill="x", padx=10, pady=(0, 8))
-
-            ctk.CTkButton(btn_frame, text="Открыть файл", width=110, height=24,
-                          font=("Segoe UI", 10), fg_color="#313244",
-                          text_color="#89b4fa", hover_color="#45475a",
-                          corner_radius=6, command=_open_file
-                          ).pack(side="left", padx=(0, 6))
-
-            ctk.CTkButton(btn_frame, text="Открыть папку", width=110, height=24,
-                          font=("Segoe UI", 10), fg_color="#313244",
-                          text_color="#6c7086", hover_color="#45475a",
-                          corner_radius=6, command=_open_folder
-                          ).pack(side="left")
-
-            win.update_idletasks()
-            new_h = max(72, win.winfo_reqheight() + 4)
-            win.geometry(f"{win._base_w}x{new_h}+{win._base_x}+{win._base_y}")
-            win.after(2500, win._do_close)
-        except Exception:
-            pass
-
-    try:
-        win.after(0, _u)
-    except Exception:
-        pass
+    hud.show_saved(str(filepath), filepath.name, preview)
 
 
 # ── Main recording pipeline ───────────────────────────────────────────────────

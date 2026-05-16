@@ -1,6 +1,6 @@
 """
 Whisper transcription and spell checking.
-A single status window near the cursor shows live progress and the final result.
+Status is shown in a Qt HUD overlay (ui.hud.PipeHud).
 """
 
 import ctypes
@@ -11,7 +11,7 @@ from pathlib import Path
 from win32.clipboard import set_clipboard_text
 import globals as g
 
-_is_recording  = False
+_is_recording   = False
 _stop_recording = threading.Event()
 _whisper_model  = None
 _spell_model    = None
@@ -91,250 +91,50 @@ def _all_required_ok(checks: dict) -> bool:
     return all(c["ok"] is not False for c in checks.values() if not c.get("optional"))
 
 
-# ── Pipeline window (progress + result near cursor) ────────────────────────────
-#
-# One small CTkFrame that:
-#   • shows a blinking REC indicator while recording
-#   • updates status text at each pipeline stage
-#   • reveals the translated result inline
-#   • auto-closes after 5 s once result is shown
-#
-_pipe_win = None   # CTk root, written from window thread, read from pipeline thread
-
+# ── HUD overlay (Qt PipeHud) ──────────────────────────────────────────────────
 
 def _cursor_pos():
-    """Return current cursor (x, y) using Win32 — safe to call from any thread."""
-    class POINT(ctypes.Structure):
+    """Win32 cursor position — kept for _show_prereq_dialog positioning."""
+    class _P(ctypes.Structure):
         _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-    pt = POINT()
+    pt = _P()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     return pt.x, pt.y
 
 
+def _get_hud():
+    """Return the PipeHud singleton, creating it on first call."""
+    from ui.hud import get_pipe_hud, init_pipe_hud
+    hud = get_pipe_hud()
+    if hud is None:
+        hud = init_pipe_hud(_stop_recording)
+    return hud
+
+
 def _open_pipe_window():
-    """
-    Open the status window near the cursor and store it in _pipe_win.
-    Blocks until the window is ready (max 2 s).
-    """
-    global _pipe_win
+    """Open the recording status HUD near the cursor."""
     cx, cy = _cursor_pos()
-    ready  = threading.Event()
-
-    def _run():
-        global _pipe_win
-        import customtkinter as ctk
-
-        ctk.set_appearance_mode("dark")
-        win = ctk.CTk()
-        _pipe_win = win
-        ready.set()
-
-        win.overrideredirect(True)
-        win.attributes("-topmost", True)
-        win.configure(fg_color="#1e1e2e")
-
-        # Position: right of cursor, above it
-        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        W = 310
-        x = min(cx + 18, sw - W - 20)
-        y = max(cy - 72, 40)
-        win.geometry(f"{W}x72+{x}+{y}")
-        win._base_x, win._base_y, win._base_w = x, y, W
-
-        outer = ctk.CTkFrame(win, fg_color="#313244", corner_radius=10,
-                              border_width=1, border_color="#45475a")
-        outer.pack(fill="both", expand=True, padx=2, pady=2)
-
-        # ── Row 1: icon  |  status text  |  timer ──
-        row1 = ctk.CTkFrame(outer, fg_color="transparent", height=38)
-        row1.pack(fill="x", padx=10, pady=(7, 0))
-        row1.pack_propagate(False)
-
-        win._icon   = ctk.CTkLabel(row1, text="●", text_color="#f38ba8",
-                                    font=("Segoe UI Bold", 15), width=18)
-        win._icon.pack(side="left")
-
-        win._status = ctk.CTkLabel(row1, text="Запись…  (клик — стоп)",
-                                    text_color="#cdd6f4",
-                                    font=("Segoe UI", 12), anchor="w")
-        win._status.pack(side="left", padx=(7, 0), fill="x", expand=True)
-
-        win._timer  = ctk.CTkLabel(row1, text="0s", text_color="#6c7086",
-                                    font=("Segoe UI", 11))
-        win._timer.pack(side="right")
-
-        # ── Row 2: result text (hidden until translation is done) ──
-        win._result = ctk.CTkLabel(outer, text="", text_color="#a6e3a1",
-                                    font=("Segoe UI", 11), anchor="w",
-                                    wraplength=W - 30, justify="left")
-        # (not packed yet)
-
-        # ── Blink while recording ──
-        win._blink_on     = True
-        win._blink_active = True
-
-        def _blink():
-            if not win._blink_active:
-                return
-            try:
-                win._blink_on = not win._blink_on
-                win._icon.configure(
-                    text_color="#f38ba8" if win._blink_on else "#45475a")
-                win.after(500, _blink)
-            except Exception:
-                pass
-        win.after(500, _blink)
-
-        # ── Follow cursor while recording ──
-        def _track_cursor():
-            if not win._blink_active:
-                return   # stop once processing starts — window stays put
-            try:
-                cx2, cy2 = _cursor_pos()
-                sw2 = win.winfo_screenwidth()
-                W2  = win._base_w
-                h2  = max(72, win.winfo_height())
-                x2  = min(cx2 + 18, sw2 - W2 - 20)
-                y2  = max(cy2 - h2 - 10, 40)
-                win._base_x, win._base_y = x2, y2
-                win.geometry(f"{W2}x{h2}+{x2}+{y2}")
-                win.after(80, _track_cursor)
-            except Exception:
-                pass
-        win.after(80, _track_cursor)
-
-        # ── Elapsed timer while recording ──
-        _t0 = [time.time()]
-        win._timer_active = True
-
-        def _tick():
-            if not win._timer_active:
-                return
-            try:
-                win._timer.configure(text=f"{int(time.time() - _t0[0])}s")
-                win.after(1000, _tick)
-            except Exception:
-                pass
-        win.after(1000, _tick)
-
-        # ── Click anywhere on the window → stop recording ──
-        def _stop(e=None):
-            _stop_recording.set()
-
-        for w in (win, outer, row1, win._icon, win._status, win._timer):
-            w.bind("<Button-1>", _stop)
-
-        win.bind("<Escape>", lambda e: _do_close())
-
-        # ── Watchdog: destroy if pipeline clears _pipe_win ──
-        def _watchdog():
-            global _pipe_win
-            if _pipe_win is None:
-                try:
-                    win.destroy()
-                except Exception:
-                    pass
-                return
-            try:
-                win.after(200, _watchdog)
-            except Exception:
-                pass
-        win.after(200, _watchdog)
-
-        def _do_close():
-            global _pipe_win
-            _pipe_win = None
-            try:
-                win.destroy()
-            except Exception:
-                pass
-
-        win._do_close = _do_close
-        win.mainloop()
-        _pipe_win = None
-
-    threading.Thread(target=_run, daemon=True).start()
-    ready.wait(timeout=2.0)
+    _get_hud().open(cx, cy)
 
 
 def _pipe_set_status(text: str, icon: str = "◌", icon_color: str = "#89b4fa"):
-    """Update status text from any thread."""
-    win = _pipe_win
-    if not win:
-        return
-    def _u():
-        try:
-            win._blink_active = False
-            win._timer_active = False
-            win._icon.configure(text=icon, text_color=icon_color)
-            win._status.configure(text=text, text_color="#cdd6f4")
-            win._timer.configure(text="")
-        except Exception:
-            pass
-    try:
-        win.after(0, _u)
-    except Exception:
-        pass
+    """Update HUD status from any thread."""
+    _get_hud().set_status(text, icon, icon_color)
 
 
 def _pipe_show_result(translated: str):
-    """Show the final result inline and schedule auto-close."""
-    win = _pipe_win
-    if not win:
-        return
-    preview = translated[:130].rstrip() + ("…" if len(translated) > 130 else "")
-
-    def _u():
-        try:
-            win._blink_active = False
-            win._timer_active = False
-            win._icon.configure(text="✓", text_color="#a6e3a1")
-            win._status.configure(text="Скопировано в буфер", text_color="#a6e3a1")
-            win._timer.configure(text="")
-            win._result.configure(text=preview)
-            win._result.pack(fill="x", padx=10, pady=(2, 8))
-            win.update_idletasks()
-            new_h = max(72, win.winfo_reqheight() + 4)
-            win.geometry(f"{win._base_w}x{new_h}+{win._base_x}+{win._base_y}")
-            win.after(1500, win._do_close)
-        except Exception:
-            pass
-    try:
-        win.after(0, _u)
-    except Exception:
-        pass
+    """Show translation result in HUD and schedule auto-close."""
+    _get_hud().show_result(translated)
 
 
 def _pipe_show_error(text: str):
-    """Show error in the window and close after 4 s."""
-    win = _pipe_win
-    if not win:
-        return
-    def _u():
-        try:
-            win._blink_active = False
-            win._timer_active = False
-            win._icon.configure(text="✗", text_color="#f38ba8")
-            win._status.configure(text=text[:80], text_color="#f38ba8")
-            win._timer.configure(text="")
-            win.after(4000, win._do_close)
-        except Exception:
-            pass
-    try:
-        win.after(0, _u)
-    except Exception:
-        pass
+    """Show error in HUD and schedule auto-close."""
+    _get_hud().show_error(text)
 
 
 def _close_pipe_window():
-    global _pipe_win
-    win = _pipe_win
-    _pipe_win = None
-    if win:
-        try:
-            win.after(0, win._do_close)
-        except Exception:
-            pass
+    """Close the HUD immediately."""
+    _get_hud().close()
 
 
 # ── Prereq dialog ──────────────────────────────────────────────────────────────

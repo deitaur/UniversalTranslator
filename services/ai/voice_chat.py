@@ -12,7 +12,7 @@ from services.ai.ollama import OLLAMA_URL, get_ollama_model
 
 SILENCE_RMS = 0.012
 SILENCE_SEC = 1.8
-MAX_SEC = 45
+MAX_SEC     = 45
 
 _VOICE_CHAT_SYSTEM = (
     "You are a helpful voice assistant. Keep responses short and conversational — "
@@ -23,107 +23,28 @@ _VOICE_CHAT_SYSTEM = (
 _is_active     = False
 _stop_evt      = threading.Event()
 _interrupt_evt = threading.Event()
-_vc_win        = None
 
 
-# ── Window ────────────────────────────────────────────────────────────────────
+# ── HUD helpers ───────────────────────────────────────────────────────────────
 
-def _open_vc_window():
-    """Open the floating voice chat panel in the top-right corner. Blocks until ready."""
-    global _vc_win
-    ready = threading.Event()
+def setup_hud():
+    """Create the VoiceChatHud singleton on the Qt main thread.
+    Called from main.py after QApplication is created, before app.exec()."""
+    from ui.hud import init_vc_hud
+    hud = init_vc_hud()
+    hud.closed.connect(_stop_evt.set)
+    hud.clicked.connect(_interrupt_evt.set)
 
-    def _run():
-        global _vc_win
-        import customtkinter as ctk
-        ctk.set_appearance_mode("dark")
-        win = ctk.CTk()
-        _vc_win = win
-        ready.set()
 
-        win.overrideredirect(True)
-        win.attributes("-topmost", True)
-        win.configure(fg_color="#1e1e2e")
-
-        W, H = 320, 78
-        x = win.winfo_screenwidth() - W - 24
-        y = 60
-        win.geometry(f"{W}x{H}+{x}+{y}")
-
-        outer = ctk.CTkFrame(win, fg_color="#313244", corner_radius=10,
-                              border_width=1, border_color="#45475a")
-        outer.pack(fill="both", expand=True, padx=2, pady=2)
-
-        hdr = ctk.CTkFrame(outer, fg_color="transparent")
-        hdr.pack(fill="x", padx=10, pady=(8, 0))
-
-        win._icon = ctk.CTkLabel(hdr, text="🎙", font=("Segoe UI", 16), width=22)
-        win._icon.pack(side="left")
-
-        win._state = ctk.CTkLabel(hdr, text="Слушаю…", text_color="#a6e3a1",
-                                   font=("Segoe UI", 12), anchor="w")
-        win._state.pack(side="left", padx=(6, 0), fill="x", expand=True)
-
-        def _do_close():
-            global _vc_win
-            _stop_evt.set()
-            _vc_win = None
-            try:
-                win.destroy()
-            except Exception:
-                pass
-
-        win._do_close = _do_close
-
-        ctk.CTkButton(hdr, text="✕", width=22, height=22,
-                       font=("Segoe UI", 11), fg_color="transparent",
-                       text_color="#6c7086", hover_color="#45475a",
-                       corner_radius=4, command=_do_close).pack(side="right")
-
-        win._sub = ctk.CTkLabel(outer, text="", text_color="#6c7086",
-                                 font=("Segoe UI", 10), anchor="w",
-                                 wraplength=W - 24, justify="left")
-        win._sub.pack(fill="x", padx=12, pady=(2, 8))
-
-        # Click anywhere on window interrupts TTS so user can speak sooner
-        def _on_click(e=None):
-            _interrupt_evt.set()
-
-        for w in (win, outer, hdr, win._icon, win._state, win._sub):
-            w.bind("<Button-1>", _on_click)
-        win.bind("<Escape>", lambda e: _do_close())
-
-        win.mainloop()
-        _vc_win = None
-
-    threading.Thread(target=_run, daemon=True).start()
-    ready.wait(timeout=2.0)
+def _hud():
+    from ui.hud import get_vc_hud
+    return get_vc_hud()
 
 
 def _vc_set_state(state: str, sub: str = ""):
-    """Update window from any thread."""
-    win = _vc_win
-    if not win:
-        return
-    _ICONS  = {"listening": "🎙", "thinking": "◌", "speaking": "🔊", "error": "✕"}
-    _COLORS = {"listening": "#a6e3a1", "thinking": "#89b4fa", "speaking": "#fab387", "error": "#f38ba8"}
-    _LABELS = {"listening": "Слушаю…", "thinking": "Думаю…", "speaking": "Говорю…", "error": "Ошибка"}
-    icon  = _ICONS.get(state, "◦")
-    color = _COLORS.get(state, "#cdd6f4")
-    label = _LABELS.get(state, state)
-
-    def _u():
-        try:
-            win._icon.configure(text=icon)
-            win._state.configure(text=label, text_color=color)
-            win._sub.configure(text=(sub[:80] if sub else ""))
-        except Exception:
-            pass
-
-    try:
-        win.after(0, _u)
-    except Exception:
-        pass
+    h = _hud()
+    if h:
+        h.set_state(state, sub)
 
 
 # ── VAD recording ─────────────────────────────────────────────────────────────
@@ -133,14 +54,14 @@ def _record_with_vad():
     import numpy as np
     import sounddevice as sd
 
-    sample_rate    = 16000
-    block_ms       = 50
-    block_size     = int(sample_rate * block_ms / 1000)
-    audio_chunks   = []
-    silence_count  = 0
-    silence_limit  = int(SILENCE_SEC * 1000 / block_ms)
-    max_chunks     = int(MAX_SEC * 1000 / block_ms)
-    has_speech     = False
+    sample_rate   = 16000
+    block_ms      = 50
+    block_size    = int(sample_rate * block_ms / 1000)
+    audio_chunks  = []
+    silence_count = 0
+    silence_limit = int(SILENCE_SEC * 1000 / block_ms)
+    max_chunks    = int(MAX_SEC * 1000 / block_ms)
+    has_speech    = False
 
     _vc_set_state("listening")
 
@@ -159,23 +80,24 @@ def _record_with_vad():
                 continue
             rms = float(np.sqrt(np.mean(audio_chunks[-1].flatten() ** 2)))
             if rms > SILENCE_RMS:
-                has_speech = True
+                has_speech    = True
                 silence_count = 0
             elif has_speech:
                 silence_count += 1
                 if silence_count >= silence_limit:
-                    break  # silence after speech → end of utterance
+                    break
 
-    _interrupt_evt.clear()  # reset in case user clicked to interrupt TTS early
+    _interrupt_evt.clear()
     if not audio_chunks or not has_speech:
         return None
+    import numpy as np
     return np.concatenate(audio_chunks, axis=0).flatten()
 
 
-# ── Ollama call ───────────────────────────────────────────────────────────────
+# ── Ollama streaming call ─────────────────────────────────────────────────────
 
 def _call_ollama(history, system_prompt):
-    """Streaming Ollama call. Updates window with partial response. Respects _stop_evt."""
+    """Stream Ollama response, updating the HUD with partial text."""
     import requests
     model    = get_ollama_model()
     messages = [{"role": "system", "content": system_prompt}] + history
@@ -213,14 +135,14 @@ def _voice_chat_loop():
     try:
         while not _stop_evt.is_set():
 
-            # ── 1. Record ──
+            # 1. Record
             audio = _record_with_vad()
             if audio is None:
                 if not _stop_evt.is_set():
                     _vc_set_state("listening")
                 continue
 
-            # ── 2. STT ──
+            # 2. STT
             _vc_set_state("thinking", "Распознаю речь…")
             try:
                 model = _load_whisper_model()
@@ -244,7 +166,7 @@ def _voice_chat_loop():
 
             _vc_set_state("thinking", text[:60])
 
-            # ── 3. LLM ──
+            # 3. LLM
             history.append({"role": "user", "content": text})
             try:
                 response = _call_ollama(history, system_prompt)
@@ -262,18 +184,17 @@ def _voice_chat_loop():
 
             history.append({"role": "assistant", "content": response})
             if len(history) > 20:
-                history = history[-20:]  # keep last 10 exchanges
+                history = history[-20:]
 
-            # ── 4. TTS ──
+            # 4. TTS
             _vc_set_state("speaking", response[:60])
             _interrupt_evt.clear()
 
             from services.ai import tts as _tts
-            speak_lang = detected if detected else src
-            _tts.speak(response, lang_code=speak_lang)
+            _tts.speak(response, lang_code=detected if detected else src)
 
-            # Wait for TTS to finish, interrupt signal, or stop
-            time.sleep(0.15)  # let TTS thread acquire the lock
+            # Wait for TTS to finish, interrupt, or stop
+            time.sleep(0.15)
             while True:
                 if _interrupt_evt.is_set() or _stop_evt.is_set():
                     _tts.stop()
@@ -291,12 +212,9 @@ def _voice_chat_loop():
         logging.getLogger("voice_chat").error("Loop error: %s", e)
     finally:
         _is_active = False
-        win = _vc_win
-        if win:
-            try:
-                win.after(0, win._do_close)
-            except Exception:
-                pass
+        h = _hud()
+        if h:
+            h.close()
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
@@ -316,7 +234,11 @@ def on_hotkey_voicechat():
         _stop_evt.clear()
         _interrupt_evt.clear()
         _is_active = True
-        _open_vc_window()
+        h = _hud()
+        if h is None:
+            _is_active = False
+            return
+        h.open()
         threading.Thread(target=_voice_chat_loop, daemon=True).start()
 
     from services.ai.whisper import _check_prerequisites, _all_required_ok, _show_prereq_dialog

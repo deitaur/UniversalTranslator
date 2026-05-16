@@ -7,7 +7,7 @@ import logging
 import traceback
 import threading
 import time
-import pystray
+from PySide6.QtWidgets import QApplication
 from config import APP_NAME, CONFIG_DIR, load_config, config, save_config_full, STARTUP_LINK
 
 # ── Setup file logging so daemon-thread crashes are visible ──
@@ -37,13 +37,13 @@ from win32.hotkeys import (register_hotkey, unregister_hotkey,
     HOTKEY_VOICECHAT, WM_HOTKEY)
 from win32.single_instance import check_single_instance, release_mutex
 from ui.icon_generator import generate_app_icon
-from ui.tray_menu import build_tray_image_deepl, update_tray_icon, _build_menu
+from ui.tray_menu import create_tray_icon, update_tray_icon, rebuild_menu
 from ui.popup_window import show_translation_popup
 from ui.settings_window import show_settings_window
 from ui.notifications import show_toast, show_translation_toast
 from services.ai.whisper import on_tray_whisper
 from services.ai.dictation import on_hotkey_dictation
-from services.ai.voice_chat import on_hotkey_voicechat
+from services.ai.voice_chat import on_hotkey_voicechat, setup_hud as setup_vc_hud
 from ui.chat_window import show_chat_window
 from utils.language import get_source_lang
 
@@ -255,7 +255,7 @@ def on_tray_translate():
 def on_tray_settings():
     log.info("Opening settings window...")
     try:
-        show_settings_window(g.current_engine, update_tray_icon, lambda: None)
+        show_settings_window(g.current_engine, update_tray_icon, rebuild_menu)
     except Exception as e:
         log.error("Failed to open settings: %s\n%s", e, traceback.format_exc())
 
@@ -265,8 +265,7 @@ def on_tray_role_chat(role_id):
 def on_tray_quit():
     stop_event.set()
     _unregister_hotkeys()
-    if g.tray_icon:
-        g.tray_icon.stop()
+    QApplication.instance().quit()
 
 def switch_to_google_silently():
     g.current_engine = "google"
@@ -320,20 +319,20 @@ def main():
         else:
             manage_autostart_shortcut(False)
 
-        icon = build_tray_image_deepl(
-            g.usage_data["character_count"],
-            g.usage_data["character_limit"]
-        )
-        g.tray_icon = pystray.Icon(
-            APP_NAME, icon, APP_NAME,
-            _build_menu(
-                on_tray_translate, on_tray_settings,
-                on_tray_whisper, on_tray_role_chat, on_tray_quit
-            )
-        )
-        update_tray_icon()
-        log.info("Tray icon created, entering main loop")
-        g.tray_icon.run()
+        app = QApplication.instance() or QApplication(sys.argv)
+        app.setQuitOnLastWindowClosed(False)
+
+        setup_vc_hud()   # create VoiceChatHud singleton on the Qt main thread
+
+        create_tray_icon({
+            "translate_clipboard": on_tray_translate,
+            "settings":            on_tray_settings,
+            "whisper":             on_tray_whisper,
+            "role_chat":           on_tray_role_chat,
+            "quit":                on_tray_quit,
+        })
+        log.info("Tray icon created, entering Qt event loop")
+        sys.exit(app.exec())
     except Exception as e:
         log.critical("FATAL ERROR: %s\n%s", e, traceback.format_exc())
         raise

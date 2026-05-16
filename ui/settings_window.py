@@ -516,7 +516,7 @@ def _save_settings(win, key_entry, yandex_key_entry, yandex_folder_entry,
         pass
 
     # Run autostart and tray updates in a background thread
-    # to avoid blocking or cross-thread tkinter/pystray conflicts
+    # run in background to avoid blocking the UI thread
     def _post_save():
         from ui.tray_menu import set_autostart
         set_autostart(config["autostart"])
