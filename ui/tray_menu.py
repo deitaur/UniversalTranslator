@@ -73,13 +73,31 @@ def update_tray_icon():
 def is_autostart_enabled():
     return STARTUP_LINK.exists()
 
+def _ensure_launcher_vbs():
+    """Create launch.vbs in CONFIG_DIR — runs main.py silently via wscript.exe."""
+    import sys
+    launcher = CONFIG_DIR / "launch.vbs"
+    main_py = Path(__file__).parent.parent / "main.py"
+    pythonw = Path(sys.executable).parent / "pythonw.exe"
+    if not pythonw.exists():
+        pythonw = Path(sys.executable)  # fallback: use python.exe
+    vbs = (
+        'Set WshShell = CreateObject("WScript.Shell")\n'
+        'WshShell.Run Chr(34) & "' + str(pythonw) + '" & Chr(34)'
+        ' & " " & Chr(34) & "' + str(main_py) + '" & Chr(34), 0, False\n'
+    )
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    launcher.write_text(vbs, encoding="utf-8")
+    return launcher
+
 def set_autostart(enable):
     if enable:
+        launcher = _ensure_launcher_vbs()
         vbs_lines = [
             'Set WshShell = CreateObject("WScript.Shell")',
             'Set shortcut = WshShell.CreateShortcut("' + str(STARTUP_LINK) + '")',
             'shortcut.TargetPath = "wscript.exe"',
-            'shortcut.Arguments = """' + str(CONFIG_DIR / "launch.vbs") + '"""',
+            'shortcut.Arguments = """' + str(launcher) + '"""',
             'shortcut.WorkingDirectory = "' + str(CONFIG_DIR) + '"',
             'shortcut.Description = "' + APP_NAME + '"',
             'shortcut.Save',
@@ -152,7 +170,7 @@ def _build_menu(on_translate_clipboard, on_settings, on_whisper, on_role_chat, o
 def create_desktop_shortcut():
     desktop = Path(os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"))
     lnk_path = desktop / (APP_NAME + ".lnk")
-    launcher = CONFIG_DIR / "launch.vbs"
+    launcher = _ensure_launcher_vbs()
     if not ICON_FILE.exists():
         from ui.icon_generator import generate_app_icon
         generate_app_icon()

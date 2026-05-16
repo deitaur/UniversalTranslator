@@ -438,8 +438,6 @@ def show_chat_window(initial_text="", mode="negotiator"):
                                     if has_selection:
                                         # Append translation after selected text
                                         entry.insert(sel_end, " [Translated]: " + translated)
-                                        # Move cursor to the end of the inserted text
-                                        entry.markplace_set(f"{sel_end}+{len(translated)}c")
                                     else:
                                         # Replace entire entry
                                         entry.delete(0, "end")

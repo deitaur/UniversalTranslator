@@ -5,7 +5,7 @@ Popup review window for translations
 import threading
 import customtkinter as ctk
 from config import APP_NAME, ICON_FILE, C
-from utils.language import LANGUAGES, get_source_lang
+from utils.language import LANGUAGES, get_source_lang, get_target_lang
 
 # Global popup references
 _popup_win = None          # reusable popup window reference
@@ -21,14 +21,14 @@ def _close_popup():
     _popup_win = None
     _popup_autoclose_id = None
 
-def show_translation_popup(original, translated, current_engine):
+def show_translation_popup(original, translated, current_engine, target_lang=None):
     global _popup_win, _popup_autoclose_id
 
     # If a popup already exists try to reuse it
     if _popup_win is not None:
         try:
             _popup_win.winfo_exists()  # raises if destroyed
-            _update_popup(_popup_win, original, translated, current_engine)
+            _update_popup(_popup_win, original, translated, current_engine, target_lang)
             _popup_win.deiconify()
             _popup_win.lift()
             _popup_win.focus_force()
@@ -80,6 +80,8 @@ def show_translation_popup(original, translated, current_engine):
         content.pack(fill="both", expand=True, padx=20, pady=(16, 8))
 
         _src_label = LANGUAGES.get(get_source_lang(), get_source_lang()).upper()
+        _tgt_code  = target_lang or get_target_lang()
+        _tgt_label = LANGUAGES.get(_tgt_code, _tgt_code).upper()
         win._orig_label = ctk.CTkLabel(content, text=f"ORIGINAL  ({_src_label})",
                                         font=("Segoe UI Semibold", 11),
                                         text_color=C["muted"], anchor="w")
@@ -95,8 +97,10 @@ def show_translation_popup(original, translated, current_engine):
         ctk.CTkLabel(content, text="   >", font=("Segoe UI", 16),
                      text_color=C["accent"]).pack(pady=2)
 
-        ctk.CTkLabel(content, text="TRANSLATION  (EN)", font=("Segoe UI Semibold", 11),
-                     text_color=C["muted"], anchor="w").pack(fill="x", pady=(4, 6))
+        win._trans_label = ctk.CTkLabel(content, text=f"TRANSLATION  ({_tgt_label})",
+                                         font=("Segoe UI Semibold", 11),
+                                         text_color=C["muted"], anchor="w")
+        win._trans_label.pack(fill="x", pady=(4, 6))
         win._trans_box = ctk.CTkTextbox(content, height=120, font=("Segoe UI", 13),
                                          fg_color=C["card"], text_color=C["green"],
                                          border_width=1, border_color=C["border"],
@@ -125,6 +129,21 @@ def show_translation_popup(original, translated, current_engine):
             win.clipboard_append(translated)
             win._copy_btn.configure(text="  Copied!  ")
             win.after(1500, lambda: win._copy_btn.configure(text="  Copy  "))
+
+        def do_speak():
+            _reset_autoclose(win)
+            from services.ai.tts import is_available
+            if not is_available():
+                return
+            tgt = target_lang or get_target_lang()
+            _do_speak_updated(win, translated, tgt)
+
+        win._speaking = False
+        win._speak_btn = ctk.CTkButton(bf, text="  ▶  ", font=("Segoe UI", 13),
+                                        fg_color=C["surface"], text_color=C["accent"],
+                                        hover_color=C["card_alt"], corner_radius=10,
+                                        width=52, height=36, command=do_speak)
+        win._speak_btn.pack(side="left", padx=(0, 8))
 
         win._copy_btn = ctk.CTkButton(bf, text="  Copy  ", font=("Segoe UI Semibold", 13),
                                        fg_color=C["accent"], text_color=C["bg"],
@@ -158,7 +177,7 @@ def show_translation_popup(original, translated, current_engine):
         win.mainloop()
     threading.Thread(target=_run, daemon=True).start()
 
-def _update_popup(win, original, translated, current_engine):
+def _update_popup(win, original, translated, current_engine, target_lang=None):
     """Refresh the content of an existing popup window."""
     # Update original text
     win._orig_box.configure(state="normal")
@@ -173,6 +192,13 @@ def _update_popup(win, original, translated, current_engine):
     # Update source language label
     _src_label = LANGUAGES.get(get_source_lang(), get_source_lang()).upper()
     win._orig_label.configure(text=f"ORIGINAL  ({_src_label})")
+    # Update translation language label
+    _tgt_code  = target_lang or get_target_lang()
+    _tgt_label = LANGUAGES.get(_tgt_code, _tgt_code).upper()
+    try:
+        win._trans_label.configure(text=f"TRANSLATION  ({_tgt_label})")
+    except Exception:
+        pass
     # Update engine badge
     engine_name = _engine_display_name(current_engine)
     engine_colors = {"deepl": C["accent"], "google": C["green"], "yandex": C["yellow"]}
@@ -183,6 +209,50 @@ def _update_popup(win, original, translated, current_engine):
     # Reset copy button
     win._copy_btn.configure(text="  Copy  ",
                              command=lambda: _do_copy_updated(win, translated))
+    # Reset speak button
+    from services.ai.tts import stop
+    stop()
+    win._speaking = False
+    try:
+        tgt = target_lang or get_target_lang()
+        win._speak_btn.configure(text="  ▶  ",
+                                  command=lambda t=translated, l=tgt: _do_speak_updated(win, t, l))
+    except Exception:
+        pass
+
+def _do_speak_updated(win, translated, lang_code):
+    from services.ai.tts import speak, stop
+    if getattr(win, "_speaking", False):
+        stop()
+        win._speaking = False
+        try:
+            win._speak_btn.configure(text="  ▶  ")
+        except Exception:
+            pass
+    else:
+        win._speaking = True
+        try:
+            win._speak_btn.configure(text="  ■  ")
+        except Exception:
+            pass
+        speak(translated, lang_code=lang_code)
+        def _poll():
+            from services.ai.tts import _speak_lock
+            if not _speak_lock.locked():
+                try:
+                    win._speaking = False
+                    win._speak_btn.configure(text="  ▶  ")
+                except Exception:
+                    pass
+            else:
+                try:
+                    win.after(200, _poll)
+                except Exception:
+                    pass
+        try:
+            win.after(200, _poll)
+        except Exception:
+            pass
 
 def _do_copy_updated(win, translated):
     _reset_autoclose(win)

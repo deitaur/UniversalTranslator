@@ -3,13 +3,12 @@ Main entry point for Universal Translator
 """
 
 import sys
-import os
 import logging
 import traceback
 import threading
 import time
 import pystray
-from config import APP_NAME, CONFIG_DIR, load_config, config, save_config_full
+from config import APP_NAME, CONFIG_DIR, load_config, config, save_config_full, STARTUP_LINK
 
 # ── Setup file logging so daemon-thread crashes are visible ──
 _LOG_FILE = CONFIG_DIR / "app.log"
@@ -34,7 +33,7 @@ from win32.clipboard import get_clipboard_text, set_clipboard_text
 from win32.keyboard import send_ctrl_c, send_ctrl_v, type_unicode_text, has_caret
 from win32.hotkeys import (register_hotkey, unregister_hotkey,
     HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_CLIPBOARD,
-    HOTKEY_WHISPER, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER, WM_HOTKEY)
+    HOTKEY_WHISPER, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER, HOTKEY_DICTATION, WM_HOTKEY)
 from win32.single_instance import check_single_instance, release_mutex
 from ui.icon_generator import generate_app_icon
 from ui.tray_menu import build_tray_image_deepl, update_tray_icon, _build_menu
@@ -42,6 +41,7 @@ from ui.popup_window import show_translation_popup
 from ui.settings_window import show_settings_window
 from ui.notifications import show_toast, show_translation_toast
 from services.ai.whisper import on_tray_whisper
+from services.ai.dictation import on_hotkey_dictation
 from ui.chat_window import show_chat_window
 from utils.language import get_source_lang
 
@@ -57,23 +57,37 @@ def _get_engine():
         return DeepLEngine()
 
 def translate_text(text):
-    return _get_engine().translate(text)
+    """Translate to the configured target language (always)."""
+    from utils.language import get_target_lang
+    return _get_engine().translate_to(text, get_target_lang())
 
 def translate_auto(text):
-    """Auto-detect direction: English→target_lang, otherwise→English."""
-    from utils.language import is_english
+    """
+    Auto-detect input language, then choose direction:
+      detected == target_lang  →  translate to source_lang (reverse)
+      detected != target_lang  →  translate to target_lang
+    Returns (translated_text, actual_target_lang_code).
+    """
+    from utils.language import detect_language, get_target_lang, get_source_lang
     engine = _get_engine()
     try:
-        if is_english(text):
-            log.debug("Text detected as English, translating to target lang")
-            return engine.translate_reverse(text)
-        log.debug("Text detected as non-English, translating to EN")
-        return engine.translate(text)
+        target   = get_target_lang()   # primary output language (e.g. "ru")
+        source   = get_source_lang()   # what user usually types (e.g. "ru")
+        detected = detect_language(text)
+        log.debug("detect=%s  target=%s  source=%s", detected, target, source)
+
+        if detected == target:
+            # Text is already in the target language → go the other way
+            reverse_to = source if source != target else "en"
+            log.debug("Reversing: %s → %s", detected, reverse_to)
+            return engine.translate_to(text, reverse_to), reverse_to
+        else:
+            log.debug("Forward: %s → %s", detected, target)
+            return engine.translate_to(text, target), target
     except Exception as e:
         log.error("Translation error: %s\n%s", e, traceback.format_exc())
         show_toast(f"Translation error: {e}")
-        return ""
-
+        return "", None
 
 def _grab_selected_text():
     try:
@@ -108,7 +122,6 @@ def _grab_selected_text():
     log.debug("Grabbed text: %s...", selected_text[:60])
     return selected_text
 
-
 def on_hotkey_replace():
     log.debug("on_hotkey_replace called")
     text = _grab_selected_text()
@@ -117,7 +130,7 @@ def on_hotkey_replace():
         return
 
     log.debug("Text (%d chars): %s...", len(text), text[:50])
-    translated = translate_auto(text)
+    translated, _ = translate_auto(text)
     if not translated:
         log.warning("Translation returned empty")
         return
@@ -127,16 +140,14 @@ def on_hotkey_replace():
     send_ctrl_v()
     show_toast("✓", 800)
 
-
 def on_hotkey_popup():
     log.debug("on_hotkey_popup called")
     text = _grab_selected_text()
     if not text.strip():
         return
-    translated = translate_auto(text)
+    translated, target_lang = translate_auto(text)
     if translated:
-        show_translation_popup(text, translated, g.current_engine)
-
+        show_translation_popup(text, translated, g.current_engine, target_lang)
 
 def on_hotkey_clipboard():
     log.debug("on_hotkey_clipboard called")
@@ -148,10 +159,11 @@ def on_hotkey_clipboard():
         set_clipboard_text(translated)
         show_toast("Translated to clipboard")
 
-
 def on_hotkey_whisper():
     on_tray_whisper()
 
+def on_hotkey_dictation_handler():
+    on_hotkey_dictation()
 
 def on_hotkey_negotiator():
     text = _grab_selected_text()
@@ -160,26 +172,23 @@ def on_hotkey_negotiator():
     else:
         show_chat_window(mode="negotiator")
 
-
 def on_hotkey_teacher():
     show_chat_window(mode="teacher")
-
 
 def _register_hotkeys():
     from win32.hotkeys import hotkey_mods_vk
     for name, hid in [("popup", HOTKEY_POPUP), ("replace", HOTKEY_REPLACE),
                       ("clipboard", HOTKEY_CLIPBOARD), ("whisper", HOTKEY_WHISPER),
+                      ("dictation", HOTKEY_DICTATION),
                       ("negotiator", HOTKEY_NEGOTIATOR), ("teacher", HOTKEY_TEACHER)]:
         mods, vk = hotkey_mods_vk(name)
         result = register_hotkey(hid, mods, vk)
         log.info("RegisterHotKey(%s, id=%d, mods=0x%x, vk=0x%x) => %s", name, hid, mods, vk, result)
 
-
 def _unregister_hotkeys():
     for hid in [HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_CLIPBOARD,
-                HOTKEY_WHISPER, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER]:
+                HOTKEY_WHISPER, HOTKEY_DICTATION, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER]:
         unregister_hotkey(hid)
-
 
 def hotkey_listener():
     import ctypes
@@ -195,6 +204,7 @@ def hotkey_listener():
         HOTKEY_REPLACE: ("replace", on_hotkey_replace),
         HOTKEY_CLIPBOARD: ("clipboard", on_hotkey_clipboard),
         HOTKEY_WHISPER: ("whisper", on_hotkey_whisper),
+        HOTKEY_DICTATION: ("dictation", on_hotkey_dictation_handler),
         HOTKEY_NEGOTIATOR: ("negotiator", on_hotkey_negotiator),
         HOTKEY_TEACHER: ("teacher", on_hotkey_teacher),
     }
@@ -235,7 +245,6 @@ def usage_refresh_loop():
 def on_tray_translate():
     on_hotkey_clipboard()
 
-
 def on_tray_settings():
     log.info("Opening settings window...")
     try:
@@ -243,10 +252,8 @@ def on_tray_settings():
     except Exception as e:
         log.error("Failed to open settings: %s\n%s", e, traceback.format_exc())
 
-
 def on_tray_role_chat(role_id):
     show_chat_window(mode=role_id)
-
 
 def on_tray_quit():
     stop_event.set()
@@ -254,12 +261,18 @@ def on_tray_quit():
     if g.tray_icon:
         g.tray_icon.stop()
 
-
 def switch_to_google_silently():
     g.current_engine = "google"
     config["engine"] = "google"
     save_config_full()
-
+def manage_autostart_shortcut(is_enabled: bool):
+    """Manage the Windows Startup shortcut via tray_menu.set_autostart."""
+    try:
+        from ui.tray_menu import set_autostart
+        set_autostart(is_enabled)
+        log.info("Autostart %s", "enabled" if is_enabled else "disabled")
+    except Exception as e:
+        log.error("Failed to manage autostart shortcut: %s", e)
 
 def main():
     is_first, mutex = check_single_instance(APP_NAME)
@@ -294,6 +307,12 @@ def main():
         threading.Thread(target=usage_refresh_loop, daemon=True).start()
         log.info("Background threads started")
 
+        # Check and set up Windows Startup shortcut based on configuration
+        if config.get("autostart", False):
+            manage_autostart_shortcut(True)
+        else:
+            manage_autostart_shortcut(False)
+
         icon = build_tray_image_deepl(
             g.usage_data["character_count"],
             g.usage_data["character_limit"]
@@ -308,7 +327,6 @@ def main():
         update_tray_icon()
         log.info("Tray icon created, entering main loop")
         g.tray_icon.run()
-
     except Exception as e:
         log.critical("FATAL ERROR: %s\n%s", e, traceback.format_exc())
         raise

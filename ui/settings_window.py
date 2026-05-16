@@ -6,6 +6,7 @@ import datetime as _dt
 import os
 import sys
 import threading
+from pathlib import Path
 import customtkinter as ctk
 from config import APP_NAME, APP_VERSION, CONFIG_DIR, ICON_FILE, C, config, save_config_full
 from utils.language import LANGUAGES
@@ -106,56 +107,54 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
                                 border_color=C["border"]).pack(padx=14, anchor="w", pady=2)
         ctk.CTkFrame(ef, fg_color="transparent", height=6).pack()
 
+        # Maps: code → display name, display name → code
+        _code_to_name = {code: name for code, name in LANGUAGES.items()}
+        _name_to_code = {name: code for code, name in LANGUAGES.items()}
+        _lang_names   = list(LANGUAGES.values())   # ["Russian", "Spanish", …]
+
         # --- Source Language ---
         lf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
                            border_width=1, border_color=C["border"])
         lf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(lf, text="Source Language", font=("Segoe UI Semibold", 13),
+        ctk.CTkLabel(lf, text="Source Language  (→ English)",
+                     font=("Segoe UI Semibold", 13),
                      text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
+        ctk.CTkLabel(lf, text="Language you write in (non-English text is translated to EN)",
+                     font=("Segoe UI", 10), text_color=C["muted"]).pack(padx=14, anchor="w")
 
-        lang_var = ctk.StringVar(value=config.get("source_lang", "ru"))
+        _src_code = config.get("source_lang", "ru")
+        lang_var  = ctk.StringVar(value=_code_to_name.get(_src_code, _src_code))
         lang_combo = ctk.CTkComboBox(lf, variable=lang_var,
-                                     values=list(LANGUAGES.keys()),
+                                     values=_lang_names,
                                      font=("Segoe UI", 12), text_color=C["text"],
                                      fg_color=C["card"], button_color=C["accent"],
                                      border_color=C["border"], dropdown_fg_color=C["card"],
-                                     dropdown_text_color=C["text"], dropdown_hover_color=C["surface"])
-        lang_combo.pack(padx=14, pady=(0, 12), fill="x")
-
-        def on_lang_change(val):
-            config["source_lang"] = val
-            save_config_full()
-
-        lang_combo.bind("<<ComboboxSelected>>", lambda e: on_lang_change(lang_var.get()))
+                                     dropdown_text_color=C["text"], dropdown_hover_color=C["surface"],
+                                     command=lambda v: None)   # live update via StringVar
+        lang_combo.pack(padx=14, pady=(6, 12), fill="x")
 
         # --- Target Language ---
         tf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
                            border_width=1, border_color=C["border"])
         tf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(tf, text="Target Language (EN → ?)", font=("Segoe UI Semibold", 13),
+        ctk.CTkLabel(tf, text="Target Language  (English → ?)",
+                     font=("Segoe UI Semibold", 13),
                      text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(tf, text="When English text is detected, translate to:", font=("Segoe UI", 10),
-                     text_color=C["muted"]).pack(padx=14, anchor="w")
+        ctk.CTkLabel(tf, text="When English text is detected, translate it to:",
+                     font=("Segoe UI", 10), text_color=C["muted"]).pack(padx=14, anchor="w")
 
-        target_values = ["(same as source)"] + list(LANGUAGES.keys())
-        current_target = config.get("target_lang", "")
-        target_var = ctk.StringVar(value=current_target if current_target else "(same as source)")
+        _SAME = "(Same as source)"
+        _tgt_code   = config.get("target_lang", "")
+        _tgt_display = _code_to_name.get(_tgt_code, _SAME) if _tgt_code else _SAME
+        target_var  = ctk.StringVar(value=_tgt_display)
         target_combo = ctk.CTkComboBox(tf, variable=target_var,
-                                        values=target_values,
-                                        font=("Segoe UI", 12), text_color=C["text"],
-                                        fg_color=C["card"], button_color=C["accent"],
-                                        border_color=C["border"], dropdown_fg_color=C["card"],
-                                        dropdown_text_color=C["text"], dropdown_hover_color=C["surface"])
-        target_combo.pack(padx=14, pady=(0, 12), fill="x")
-
-        def on_target_change(val):
-            if val == "(same as source)":
-                config["target_lang"] = ""
-            else:
-                config["target_lang"] = val
-            save_config_full()
-
-        target_combo.bind("<<ComboboxSelected>>", lambda e: on_target_change(target_var.get()))
+                                       values=[_SAME] + _lang_names,
+                                       font=("Segoe UI", 12), text_color=C["text"],
+                                       fg_color=C["card"], button_color=C["accent"],
+                                       border_color=C["border"], dropdown_fg_color=C["card"],
+                                       dropdown_text_color=C["text"], dropdown_hover_color=C["surface"],
+                                       command=lambda v: None)  # live update via StringVar
+        target_combo.pack(padx=14, pady=(6, 12), fill="x")
 
         # --- API Keys ---
         kf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
@@ -219,7 +218,49 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
         ctk.CTkCheckBox(sf, text="Direct type replacement (no clipboard)", variable=direct_var,
                         font=("Segoe UI", 12), text_color=C["text"],
                         fg_color=C["accent"], hover_color=C["accent"],
-                        border_color=C["border"]).pack(padx=14, anchor="w", pady=(2, 12))
+                        border_color=C["border"]).pack(padx=14, anchor="w", pady=2)
+
+        # TTS voice engine
+        ctk.CTkFrame(sf, fg_color=C["border"], height=1).pack(fill="x", padx=14, pady=(8, 6))
+        tts_row = ctk.CTkFrame(sf, fg_color="transparent")
+        tts_row.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(tts_row, text="Голос озвучки:", font=("Segoe UI", 12),
+                     text_color=C["text"]).pack(side="left")
+
+        from services.ai.tts import gtts_installed
+        _gtts_ok = gtts_installed()
+        _tts_options = ["Google (gTTS)" if _gtts_ok else "Google (pip install gtts)", "Windows SAPI"]
+        _tts_stored  = {"Google (gTTS)": "gtts", "Google (pip install gtts)": "gtts", "Windows SAPI": "sapi"}
+        _tts_display = {"gtts": "Google (gTTS)" if _gtts_ok else "Google (pip install gtts)",
+                        "sapi": "Windows SAPI"}
+        tts_engine_var = ctk.StringVar(
+            value=_tts_display.get(config.get("tts_engine", "gtts"), "Google (gTTS)"))
+        tts_combo = ctk.CTkComboBox(tts_row, variable=tts_engine_var,
+                                    values=_tts_options, width=180, height=28,
+                                    font=("Segoe UI", 12), text_color=C["text"],
+                                    fg_color=C["card_alt"], button_color=C["accent"],
+                                    border_color=C["border"], dropdown_fg_color=C["card"],
+                                    dropdown_text_color=C["text"],
+                                    dropdown_hover_color=C["surface"],
+                                    state="normal" if _gtts_ok else "readonly",
+                                    command=lambda v: None)
+        tts_combo.pack(side="left", padx=(10, 0))
+
+        def _test_tts():
+            from services.ai.tts import speak
+            tts_btn.configure(text="▶ …", state="disabled")
+            engine_sel = _tts_stored.get(tts_engine_var.get(), "gtts")
+            from config import config as _cfg
+            _cfg["tts_engine"] = engine_sel
+            speak("Проверка голоса", lang_code="ru")
+            win.after(3000, lambda: tts_btn.configure(text="▶ Тест", state="normal"))
+
+        tts_btn = ctk.CTkButton(tts_row, text="▶ Тест", width=70, height=28,
+                                font=("Segoe UI", 11), fg_color=C["surface"],
+                                text_color=C["accent"], hover_color=C["card_alt"],
+                                corner_radius=6, command=_test_tts)
+        tts_btn.pack(side="left", padx=(8, 0))
+        ctk.CTkFrame(sf, fg_color="transparent", height=8).pack()
 
         # --- Ollama (Negotiator AI) ---
         of = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
@@ -285,6 +326,83 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
                        command=_on_load_ai)
         load_btn.pack(side="right", fill="x", expand=True, padx=(6, 0))
 
+        # --- Voice Dictation ---
+        df = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
+                           border_width=1, border_color=C["border"])
+        df.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(df, text="Голосовая диктовка  (Ctrl+Alt+D)",
+                     font=("Segoe UI Semibold", 13),
+                     text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
+        ctk.CTkLabel(df, text="Запись голоса → транскрипция → сохранение в файл",
+                     font=("Segoe UI", 10), text_color=C["muted"]).pack(padx=14, anchor="w")
+
+        # Save folder
+        ctk.CTkLabel(df, text="Папка сохранения:", font=("Segoe UI", 11),
+                     text_color=C["subtext"]).pack(padx=14, pady=(10, 2), anchor="w")
+        folder_row = ctk.CTkFrame(df, fg_color="transparent")
+        folder_row.pack(fill="x", padx=14, pady=(0, 6))
+
+        _default_dict_folder = str(Path.home() / "Documents" / "Dictations")
+        dict_folder_var = ctk.StringVar(value=config.get("dictation_folder", _default_dict_folder))
+        dict_folder_entry = ctk.CTkEntry(folder_row, textvariable=dict_folder_var,
+                                          font=("Segoe UI", 11), text_color=C["text"],
+                                          fg_color=C["card_alt"], border_color=C["border"],
+                                          height=28)
+        dict_folder_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        def _browse_dict_folder():
+            from tkinter import filedialog
+            win.attributes("-topmost", False)
+            folder = filedialog.askdirectory(
+                title="Папка для сохранения диктовок", parent=win,
+                initialdir=dict_folder_var.get() or str(Path.home()))
+            win.attributes("-topmost", True)
+            win.lift()
+            if folder:
+                dict_folder_var.set(folder)
+
+        ctk.CTkButton(folder_row, text="…", width=32, height=28,
+                       font=("Segoe UI", 12), fg_color=C["card_alt"],
+                       text_color=C["text"], hover_color=C["border"],
+                       corner_radius=6, command=_browse_dict_folder).pack(side="left")
+
+        # Format + Obsidian options
+        fmt_row = ctk.CTkFrame(df, fg_color="transparent")
+        fmt_row.pack(fill="x", padx=14, pady=(0, 4))
+
+        ctk.CTkLabel(fmt_row, text="Формат:", font=("Segoe UI", 11),
+                     text_color=C["subtext"]).pack(side="left")
+        _fmt_opts = ["Markdown (.md)", "Текст (.txt)"]
+        _fmt_stored = {"Markdown (.md)": "md", "Текст (.txt)": "txt"}
+        _fmt_display = {"md": "Markdown (.md)", "txt": "Текст (.txt)"}
+        dict_fmt_var = ctk.StringVar(
+            value=_fmt_display.get(config.get("dictation_format", "md"), "Markdown (.md)"))
+        ctk.CTkComboBox(fmt_row, variable=dict_fmt_var, values=_fmt_opts,
+                        width=150, height=26, font=("Segoe UI", 11),
+                        text_color=C["text"], fg_color=C["card_alt"],
+                        button_color=C["accent"], border_color=C["border"],
+                        dropdown_fg_color=C["card"], dropdown_text_color=C["text"],
+                        dropdown_hover_color=C["surface"],
+                        command=lambda v: None).pack(side="left", padx=(8, 0))
+
+        obsidian_var = ctk.BooleanVar(value=config.get("dictation_obsidian", True))
+        ctk.CTkCheckBox(fmt_row, text="Obsidian frontmatter", variable=obsidian_var,
+                        font=("Segoe UI", 11), text_color=C["text"],
+                        fg_color=C["accent"], hover_color=C["accent"],
+                        border_color=C["border"]).pack(side="left", padx=(14, 0))
+
+        # Tags
+        tags_row = ctk.CTkFrame(df, fg_color="transparent")
+        tags_row.pack(fill="x", padx=14, pady=(0, 12))
+        ctk.CTkLabel(tags_row, text="Теги (через запятую):", font=("Segoe UI", 11),
+                     text_color=C["subtext"]).pack(side="left")
+        dict_tags_entry = ctk.CTkEntry(tags_row, font=("Segoe UI", 11),
+                                        text_color=C["text"], fg_color=C["card_alt"],
+                                        border_color=C["border"], height=26,
+                                        placeholder_text="dictation, notes")
+        dict_tags_entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        dict_tags_entry.insert(0, config.get("dictation_tags", "dictation"))
+
         # --- Hotkeys ---
         hf = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
                            border_width=1, border_color=C["border"])
@@ -296,7 +414,8 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
         for name, label in [("popup", "Show Popup (Ctrl+Alt+T)"),
                             ("replace", "Replace Text (Ctrl+Alt+R)"),
                             ("clipboard", "Translate Clipboard (Ctrl+Alt+Y)"),
-                            ("whisper", "Voice Dictate (Ctrl+Alt+W)"),
+                            ("whisper", "Voice to Text (Ctrl+Alt+W)"),
+                            ("dictation", "Voice Dictation (Ctrl+Alt+D)"),
                             ("negotiator", "Negotiator (Ctrl+Alt+N)"),
                             ("teacher", "English Teacher (Ctrl+Alt+E)")]:
             ctk.CTkLabel(hf, text=label, font=("Segoe UI", 12),
@@ -309,10 +428,21 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
             hotkey_entries[name] = entry
 
         # --- Save Button ---
+        def _on_save():
+            _save_settings(
+                win, key_entry, yandex_key_entry, yandex_folder_entry,
+                ollama_entry, neg_lang_var, autostart_var, clipboard_var, direct_var,
+                hotkey_entries, update_tray_icon, rebuild_menu,
+                lang_var, target_var, _name_to_code,
+                tts_engine_var, _tts_stored,
+                dict_folder_var, dict_fmt_var, _fmt_stored,
+                obsidian_var, dict_tags_entry,
+            )
+
         save_btn = ctk.CTkButton(win, text="Save Settings", font=("Segoe UI Semibold", 14),
                                  fg_color=C["accent"], text_color=C["bg"],
                                  hover_color="#7ba4e8", corner_radius=10,
-                                 height=48, command=lambda: _save_settings(win, key_entry, yandex_key_entry, yandex_folder_entry, ollama_entry, neg_lang_var, autostart_var, clipboard_var, direct_var, hotkey_entries, update_tray_icon, rebuild_menu))
+                                 height=48, command=_on_save)
         save_btn.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
 
         _log.info("Settings window mainloop starting")
@@ -322,28 +452,57 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
 
     threading.Thread(target=_run, daemon=True).start()
 
-def _save_settings(win, key_entry, yandex_key_entry, yandex_folder_entry, ollama_entry, neg_lang_var, autostart_var, clipboard_var, direct_var, hotkey_entries, update_tray_icon, rebuild_menu):
+def _save_settings(win, key_entry, yandex_key_entry, yandex_folder_entry,
+                   ollama_entry, neg_lang_var, autostart_var, clipboard_var, direct_var,
+                   hotkey_entries, update_tray_icon, rebuild_menu,
+                   lang_var=None, target_var=None, name_to_code=None,
+                   tts_engine_var=None, tts_stored_map=None,
+                   dict_folder_var=None, dict_fmt_var=None, dict_fmt_stored=None,
+                   obsidian_var=None, dict_tags_entry=None):
     """Save all settings."""
-    config["api_key"] = key_entry.get().strip()
-    config["yandex_api_key"] = yandex_key_entry.get().strip()
+    config["api_key"]          = key_entry.get().strip()
+    config["yandex_api_key"]   = yandex_key_entry.get().strip()
     config["yandex_folder_id"] = yandex_folder_entry.get().strip()
     ollama_val = ollama_entry.get().strip()
     if ollama_val:
         config["ollama_model"] = ollama_val
     config["negotiator_lang"] = neg_lang_var.get()
-    config["autostart"] = autostart_var.get()
-    config["clipboard_only"] = clipboard_var.get()
-    config["direct_type"] = direct_var.get()
+    config["autostart"]       = autostart_var.get()
+    config["clipboard_only"]  = clipboard_var.get()
+    config["direct_type"]     = direct_var.get()
+    if tts_engine_var and tts_stored_map:
+        config["tts_engine"] = tts_stored_map.get(tts_engine_var.get(), "gtts")
+
+    # Dictation settings
+    if dict_folder_var:
+        config["dictation_folder"] = dict_folder_var.get().strip()
+    if dict_fmt_var and dict_fmt_stored:
+        config["dictation_format"] = dict_fmt_stored.get(dict_fmt_var.get(), "md")
+    if obsidian_var is not None:
+        config["dictation_obsidian"] = obsidian_var.get()
+    if dict_tags_entry is not None:
+        config["dictation_tags"] = dict_tags_entry.get().strip()
+
+    # Source and target languages
+    if lang_var and name_to_code is not None:
+        src_name = lang_var.get()
+        config["source_lang"] = name_to_code.get(src_name, src_name)
+
+    if target_var and name_to_code is not None:
+        tgt_name = target_var.get()
+        if tgt_name == "(Same as source)":
+            config["target_lang"] = ""
+        else:
+            config["target_lang"] = name_to_code.get(tgt_name, tgt_name)
 
     for name in hotkey_entries:
         hk = hotkey_entries[name].get().strip()
         if hk:
-            # Validate hotkey
             try:
                 parse_hotkey_string(hk)
                 config[f"hotkey_{name}"] = hk
-            except:
-                pass  # Invalid, skip
+            except Exception:
+                pass
 
     save_config_full()
 

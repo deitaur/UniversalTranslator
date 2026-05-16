@@ -72,7 +72,6 @@ def is_english(text):
     """Detect if text is primarily English by character analysis."""
     if not text.strip():
         return False
-    # Count ASCII letters vs non-ASCII letters
     ascii_letters = 0
     non_ascii_letters = 0
     for ch in text:
@@ -84,5 +83,33 @@ def is_english(text):
     total = ascii_letters + non_ascii_letters
     if total == 0:
         return False
-    # If >70% ASCII letters, consider it English
     return (ascii_letters / total) > 0.7
+
+
+def detect_language(text: str) -> str:
+    """
+    Detect the language of *text* using Google Translate's free auto-detect.
+    Returns a BCP-47 language code (e.g. 'ru', 'en', 'de').
+    Falls back to source_lang config value on any error.
+    """
+    if not text.strip():
+        return get_source_lang()
+    try:
+        import requests
+        # Use max 300 chars — enough for reliable detection, fast request
+        r = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "auto", "tl": "en",
+                    "dt": "t", "q": text[:300]},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=5,
+        )
+        r.raise_for_status()
+        data = r.json()
+        # data[2] = detected source language code ("ru", "en", "de", …)
+        if isinstance(data, list) and len(data) > 2 and isinstance(data[2], str):
+            return data[2]
+    except Exception:
+        pass
+    # Offline fallback: character-ratio heuristic
+    return "en" if is_english(text) else get_source_lang()

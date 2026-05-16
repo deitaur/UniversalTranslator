@@ -18,6 +18,7 @@ HOTKEY_CLIPBOARD = 3
 HOTKEY_WHISPER = 4
 HOTKEY_NEGOTIATOR = 5
 HOTKEY_TEACHER = 6
+HOTKEY_DICTATION = 7
 
 WM_HOTKEY = 0x0312
 
@@ -42,6 +43,7 @@ DEFAULT_HOTKEYS = {
     "whisper":    "Ctrl+Alt+W",
     "negotiator": "Ctrl+Alt+N",
     "teacher":    "Ctrl+Alt+E",
+    "dictation":  "Ctrl+Alt+D",
 }
 
 user32 = ctypes.windll.user32
