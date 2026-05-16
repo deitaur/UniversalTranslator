@@ -185,6 +185,24 @@ def _open_pipe_window():
                 pass
         win.after(500, _blink)
 
+        # ── Follow cursor while recording ──
+        def _track_cursor():
+            if not win._blink_active:
+                return   # stop once processing starts — window stays put
+            try:
+                cx2, cy2 = _cursor_pos()
+                sw2 = win.winfo_screenwidth()
+                W2  = win._base_w
+                h2  = max(72, win.winfo_height())
+                x2  = min(cx2 + 18, sw2 - W2 - 20)
+                y2  = max(cy2 - h2 - 10, 40)
+                win._base_x, win._base_y = x2, y2
+                win.geometry(f"{W2}x{h2}+{x2}+{y2}")
+                win.after(80, _track_cursor)
+            except Exception:
+                pass
+        win.after(80, _track_cursor)
+
         # ── Elapsed timer while recording ──
         _t0 = [time.time()]
         win._timer_active = True
@@ -278,7 +296,7 @@ def _pipe_show_result(translated: str):
             win.update_idletasks()
             new_h = max(72, win.winfo_reqheight() + 4)
             win.geometry(f"{win._base_w}x{new_h}+{win._base_x}+{win._base_y}")
-            win.after(5000, win._do_close)
+            win.after(1500, win._do_close)
         except Exception:
             pass
     try:

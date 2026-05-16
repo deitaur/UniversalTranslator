@@ -33,7 +33,8 @@ from win32.clipboard import get_clipboard_text, set_clipboard_text
 from win32.keyboard import send_ctrl_c, send_ctrl_v, type_unicode_text, has_caret
 from win32.hotkeys import (register_hotkey, unregister_hotkey,
     HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_CLIPBOARD,
-    HOTKEY_WHISPER, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER, HOTKEY_DICTATION, WM_HOTKEY)
+    HOTKEY_WHISPER, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER, HOTKEY_DICTATION,
+    HOTKEY_VOICECHAT, WM_HOTKEY)
 from win32.single_instance import check_single_instance, release_mutex
 from ui.icon_generator import generate_app_icon
 from ui.tray_menu import build_tray_image_deepl, update_tray_icon, _build_menu
@@ -42,6 +43,7 @@ from ui.settings_window import show_settings_window
 from ui.notifications import show_toast, show_translation_toast
 from services.ai.whisper import on_tray_whisper
 from services.ai.dictation import on_hotkey_dictation
+from services.ai.voice_chat import on_hotkey_voicechat
 from ui.chat_window import show_chat_window
 from utils.language import get_source_lang
 
@@ -175,11 +177,14 @@ def on_hotkey_negotiator():
 def on_hotkey_teacher():
     show_chat_window(mode="teacher")
 
+def on_hotkey_voicechat_handler():
+    on_hotkey_voicechat()
+
 def _register_hotkeys():
     from win32.hotkeys import hotkey_mods_vk
     for name, hid in [("popup", HOTKEY_POPUP), ("replace", HOTKEY_REPLACE),
                       ("clipboard", HOTKEY_CLIPBOARD), ("whisper", HOTKEY_WHISPER),
-                      ("dictation", HOTKEY_DICTATION),
+                      ("dictation", HOTKEY_DICTATION), ("voicechat", HOTKEY_VOICECHAT),
                       ("negotiator", HOTKEY_NEGOTIATOR), ("teacher", HOTKEY_TEACHER)]:
         mods, vk = hotkey_mods_vk(name)
         result = register_hotkey(hid, mods, vk)
@@ -187,7 +192,8 @@ def _register_hotkeys():
 
 def _unregister_hotkeys():
     for hid in [HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_CLIPBOARD,
-                HOTKEY_WHISPER, HOTKEY_DICTATION, HOTKEY_NEGOTIATOR, HOTKEY_TEACHER]:
+                HOTKEY_WHISPER, HOTKEY_DICTATION, HOTKEY_VOICECHAT,
+                HOTKEY_NEGOTIATOR, HOTKEY_TEACHER]:
         unregister_hotkey(hid)
 
 def hotkey_listener():
@@ -205,6 +211,7 @@ def hotkey_listener():
         HOTKEY_CLIPBOARD: ("clipboard", on_hotkey_clipboard),
         HOTKEY_WHISPER: ("whisper", on_hotkey_whisper),
         HOTKEY_DICTATION: ("dictation", on_hotkey_dictation_handler),
+        HOTKEY_VOICECHAT: ("voicechat", on_hotkey_voicechat_handler),
         HOTKEY_NEGOTIATOR: ("negotiator", on_hotkey_negotiator),
         HOTKEY_TEACHER: ("teacher", on_hotkey_teacher),
     }

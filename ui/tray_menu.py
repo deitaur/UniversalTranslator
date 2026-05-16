@@ -9,11 +9,23 @@ from PIL import Image, ImageDraw, ImageFont
 from config import APP_NAME, CONFIG_DIR, STARTUP_DIR, STARTUP_LINK, C, config, save_config_full, ICON_FILE
 import globals as g
 
+_LANG_FLAGS = {
+    "en": "🇬🇧", "ru": "🇷🇺", "de": "🇩🇪", "fr": "🇫🇷",
+    "es": "🇪🇸", "zh": "🇨🇳", "ja": "🇯🇵", "ko": "🇰🇷",
+    "pt": "🇵🇹", "it": "🇮🇹", "ar": "🇸🇦", "nl": "🇳🇱",
+    "pl": "🇵🇱", "tr": "🇹🇷", "uk": "🇺🇦", "cs": "🇨🇿",
+}
+
 def _font(size):
     try:
         return ImageFont.truetype("arial.ttf", size)
     except OSError:
         return ImageFont.load_default()
+
+def _tgt_label():
+    """Return 2-letter uppercase target language code for icon rendering."""
+    from utils.language import get_target_lang
+    return get_target_lang().upper()[:2]
 
 def _build_base_icon():
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
@@ -21,6 +33,11 @@ def _build_base_icon():
     d.rounded_rectangle([2, 2, 62, 62], radius=12, fill=(24, 24, 37, 240))
     d.rounded_rectangle([3, 3, 61, 61], radius=11, outline=(88, 91, 112, 100), width=1)
     return img, d
+
+def _draw_lang_badge(d, lang: str):
+    """Draw a small language code badge in the bottom-right of the icon."""
+    d.rectangle([34, 42, 62, 62], fill=(24, 24, 37, 200))  # dark bg patch
+    d.text((36, 44), lang, fill=(137, 180, 250), font=_font(13))
 
 def build_tray_image_deepl(used, limit):
     img, d = _build_base_icon()
@@ -32,33 +49,42 @@ def build_tray_image_deepl(used, limit):
     if fx1 > bx0:
         color = (166, 227, 161) if frac > 0.25 else (249, 226, 175) if frac > 0.1 else (243, 139, 168)
         d.rounded_rectangle([bx0, by0, fx1, by1], radius=4, fill=color)
+    _draw_lang_badge(d, _tgt_label())
     return img
 
 def build_tray_image_google():
     img, d = _build_base_icon()
     d.text((16, 4), "G", fill=(66, 133, 244), font=_font(30))
-    d.text((14, 44), "free", fill=(108, 112, 134), font=_font(11))
+    d.text((8, 44), _tgt_label(), fill=(137, 180, 250), font=_font(16))
     return img
 
 def build_tray_image_yandex():
     img, d = _build_base_icon()
     d.text((16, 4), "Y", fill=(255, 204, 0), font=_font(30))
-    d.text((14, 44), "free", fill=(108, 112, 134), font=_font(11))
+    d.text((8, 44), _tgt_label(), fill=(137, 180, 250), font=_font(16))
     return img
 
 def _engine_display_name():
     return {"deepl": "DeepL", "google": "Google Translate", "yandex": "Yandex Translate"}.get(g.current_engine, g.current_engine)
 
+def _tray_title_suffix():
+    """Flag + lang code suffix for the tray tooltip."""
+    from utils.language import get_target_lang
+    tgt = get_target_lang()
+    flag = _LANG_FLAGS.get(tgt, "")
+    return f"  {flag} →{tgt.upper()}" if flag else f"  →{tgt.upper()}"
+
 def update_tray_icon():
     if g.tray_icon is None:
         return
     name = _engine_display_name()
+    suffix = _tray_title_suffix()
     if g.current_engine == "google":
         g.tray_icon.icon = build_tray_image_google()
-        g.tray_icon.title = APP_NAME + "  [" + name + "]"
+        g.tray_icon.title = APP_NAME + "  [" + name + "]" + suffix
     elif g.current_engine == "yandex":
         g.tray_icon.icon = build_tray_image_yandex()
-        g.tray_icon.title = APP_NAME + "  [" + name + "]"
+        g.tray_icon.title = APP_NAME + "  [" + name + "]" + suffix
     else:
         used = g.usage_data["character_count"]
         limit = g.usage_data["character_limit"]
@@ -66,9 +92,10 @@ def update_tray_icon():
         if limit > 0:
             rem = limit - used
             pct = rem / limit * 100
-            g.tray_icon.title = APP_NAME + "  [" + name + "]\n" + format(rem, ",") + " chars left (" + format(pct, ".1f") + "%)"
+            g.tray_icon.title = (APP_NAME + "  [" + name + "]" + suffix + "\n"
+                                 + format(rem, ",") + " chars left (" + format(pct, ".1f") + "%)")
         else:
-            g.tray_icon.title = APP_NAME + "  [" + name + "]"
+            g.tray_icon.title = APP_NAME + "  [" + name + "]" + suffix
 
 def is_autostart_enabled():
     return STARTUP_LINK.exists()

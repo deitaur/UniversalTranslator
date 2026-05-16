@@ -15,8 +15,7 @@ from config import config
 from services.ai.whisper import (
     _open_pipe_window, _pipe_set_status, _pipe_show_error,
     _load_whisper_model, _fix_russian_spelling,
-    _setup_click_hook, _stop_recording, _pipe_win,
-    _cursor_pos,
+    _setup_click_hook, _stop_recording,
 )
 
 _is_dictating = False
@@ -110,7 +109,7 @@ def _show_saved_popup(filepath: Path, text: str):
             win.update_idletasks()
             new_h = max(72, win.winfo_reqheight() + 4)
             win.geometry(f"{win._base_w}x{new_h}+{win._base_x}+{win._base_y}")
-            win.after(8000, win._do_close)
+            win.after(2500, win._do_close)
         except Exception:
             pass
 

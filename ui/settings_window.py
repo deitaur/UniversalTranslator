@@ -116,11 +116,12 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
         lf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
                            border_width=1, border_color=C["border"])
         lf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(lf, text="Source Language  (→ English)",
+        ctk.CTkLabel(lf, text="Ваш язык (исходный)",
                      font=("Segoe UI Semibold", 13),
                      text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(lf, text="Language you write in (non-English text is translated to EN)",
-                     font=("Segoe UI", 10), text_color=C["muted"]).pack(padx=14, anchor="w")
+        ctk.CTkLabel(lf, text="Язык, на котором вы обычно пишете. При авто-определении — направление обратного перевода.",
+                     font=("Segoe UI", 10), text_color=C["muted"],
+                     wraplength=340, justify="left").pack(padx=14, anchor="w")
 
         _src_code = config.get("source_lang", "ru")
         lang_var  = ctk.StringVar(value=_code_to_name.get(_src_code, _src_code))
@@ -137,11 +138,12 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
         tf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
                            border_width=1, border_color=C["border"])
         tf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(tf, text="Target Language  (English → ?)",
+        ctk.CTkLabel(tf, text="Переводить на язык",
                      font=("Segoe UI Semibold", 13),
                      text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(tf, text="When English text is detected, translate it to:",
-                     font=("Segoe UI", 10), text_color=C["muted"]).pack(padx=14, anchor="w")
+        ctk.CTkLabel(tf, text="Язык перевода по умолчанию. Например, выберите English — и всё будет переводиться в английский.",
+                     font=("Segoe UI", 10), text_color=C["muted"],
+                     wraplength=340, justify="left").pack(padx=14, anchor="w")
 
         _SAME = "(Same as source)"
         _tgt_code   = config.get("target_lang", "")
@@ -416,6 +418,7 @@ def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
                             ("clipboard", "Translate Clipboard (Ctrl+Alt+Y)"),
                             ("whisper", "Voice to Text (Ctrl+Alt+W)"),
                             ("dictation", "Voice Dictation (Ctrl+Alt+D)"),
+                            ("voicechat", "Voice AI Chat (Ctrl+Alt+V)"),
                             ("negotiator", "Negotiator (Ctrl+Alt+N)"),
                             ("teacher", "English Teacher (Ctrl+Alt+E)")]:
             ctk.CTkLabel(hf, text=label, font=("Segoe UI", 12),

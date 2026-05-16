@@ -6,6 +6,7 @@ import locale
 
 # Source languages (code -> display name)
 LANGUAGES = {
+    "en": "English",
     "ru": "Russian",
     "es": "Spanish",
     "fr": "French",
@@ -25,7 +26,7 @@ LANGUAGES = {
 
 # Windows locale ID -> language code (most common)
 _WIN_LOCALE_MAP = {
-    "ru": "ru", "es": "es", "fr": "fr", "de": "de", "zh": "zh",
+    "en": "en", "ru": "ru", "es": "es", "fr": "fr", "de": "de", "zh": "zh",
     "ja": "ja", "ko": "ko", "pt": "pt", "it": "it", "ar": "ar",
     "nl": "nl", "pl": "pl", "tr": "tr", "uk": "uk", "cs": "cs",
 }
