@@ -1,163 +1,174 @@
-"""
-Toast notifications — lightweight popups near the mouse cursor.
-Uses plain tkinter (not customtkinter) to avoid conflicts with
-CTk() root windows running in other threads.
-"""
+"""Toast notifications — PySide6, thread-safe via QObject signal manager."""
 
 import ctypes
+import ctypes.wintypes
 import logging
-import traceback
-import threading
-import tkinter as tk
+from typing import Optional
+
+from PySide6.QtCore import QObject, QRectF, QTimer, Qt, Signal, Slot
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 log = logging.getLogger("notifications")
 
-# Catppuccin Mocha palette (duplicated here to avoid circular imports)
-_BG       = "#1e1e2e"
-_SURFACE  = "#313244"
-_BORDER   = "#585b70"
-_ACCENT   = "#89b4fa"
-_TEXT     = "#cdd6f4"
-_MUTED    = "#6c7086"
+_SURFACE = "#313244"
+_BORDER  = "#585b70"
+_ACCENT  = "#89b4fa"
+_TEXT    = "#cdd6f4"
+_MUTED   = "#6c7086"
 
-# Win32 constants for non-activating windows
-_GWL_EXSTYLE       = -20
-_WS_EX_NOACTIVATE  = 0x08000000
-_WS_EX_TOOLWINDOW  = 0x00000080
+_GWL_EXSTYLE      = -20
+_WS_EX_NOACTIVATE = 0x08000000
+_WS_EX_TOOLWINDOW = 0x00000080
 
 
-def _make_noactivate(root):
-    """Prevent the toast window from stealing keyboard focus."""
+def _cursor_pos() -> tuple[int, int]:
+    class _P(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+    pt = _P()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+def _screen_wh() -> tuple[int, int]:
+    u = ctypes.windll.user32
+    return u.GetSystemMetrics(0), u.GetSystemMetrics(1)
+
+
+def _noactivate(hwnd: int):
     try:
-        hwnd = root.winfo_id()
-        user32 = ctypes.windll.user32
-        style = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
-        user32.SetWindowLongW(hwnd, _GWL_EXSTYLE,
-                              style | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW)
-    except Exception as ex:
-        log.debug("_make_noactivate failed: %s", ex)
+        u = ctypes.windll.user32
+        st = u.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+        u.SetWindowLongW(hwnd, _GWL_EXSTYLE, st | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW)
+    except Exception as e:
+        log.debug("noactivate failed: %s", e)
 
 
-def show_toast(message, duration_ms=2000):
-    """Display a small temporary pop-up notification near the cursor."""
-    def _run():
-        try:
-            root = tk.Tk()
-            root.overrideredirect(True)
-            root.attributes("-topmost", True)
-            root.attributes("-alpha", 0.95)
-            root.configure(bg=_BG)
-            root.withdraw()  # hide until positioned
+class _Toast(QWidget):
+    """Frameless notification widget that fades out after duration_ms."""
 
-            cx, cy = root.winfo_pointerx(), root.winfo_pointery()
-            root.geometry(f"+{cx + 20}+{cy - 40}")
+    def __init__(self, message: str, duration_ms: int, translation: bool = False):
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setWindowOpacity(0.95)
+        self._translation = translation
 
-            frame = tk.Frame(root, bg=_SURFACE, bd=1, relief="solid",
-                             highlightbackground=_BORDER, highlightthickness=1)
-            frame.pack(padx=2, pady=2)
-            tk.Label(frame, text=message, fg=_TEXT, bg=_SURFACE,
-                     font=("Segoe UI", 13), padx=16, pady=10).pack()
+        lo = QVBoxLayout(self)
+        lo.setContentsMargins(14, 10, 14, 10)
+        lo.setSpacing(3)
 
-            root.update_idletasks()
-            _make_noactivate(root)
-            root.deiconify()  # show
+        sw, sh = _screen_wh()
+        max_w = min(460, sw - 40)
 
-            def fade_out(alpha=0.95):
-                alpha -= 0.05
-                if alpha <= 0:
-                    root.destroy()
-                    return
-                root.attributes("-alpha", alpha)
-                root.after(30, fade_out, alpha)
+        if translation:
+            hdr = QLabel("Translation")
+            hdr.setFont(QFont("Segoe UI Semibold", 9))
+            hdr.setStyleSheet(f"color: {_ACCENT};")
+            lo.addWidget(hdr)
 
-            root.after(duration_ms, fade_out)
-            root.mainloop()
-        except Exception as e:
-            log.error("show_toast error: %s\n%s", e, traceback.format_exc())
-    threading.Thread(target=_run, daemon=True).start()
+        lbl = QLabel(message)
+        lbl.setFont(QFont("Segoe UI", 12))
+        lbl.setStyleSheet(f"color: {_TEXT};")
+        if translation:
+            lbl.setWordWrap(True)
+            lbl.setMaximumWidth(max_w - 40)
+        lo.addWidget(lbl)
 
+        if translation:
+            hint = QLabel("copied to clipboard  •  click to close")
+            hint.setFont(QFont("Segoe UI", 8))
+            hint.setStyleSheet(f"color: {_MUTED};")
+            lo.addWidget(hint)
 
-def show_translation_toast(message, duration_ms=5000):
-    """Display a larger popup for showing full translation text near cursor."""
-    def _run():
-        try:
-            root = tk.Tk()
-            root.overrideredirect(True)
-            root.attributes("-topmost", True)
-            root.attributes("-alpha", 0.95)
-            root.configure(bg=_BG)
-            root.withdraw()  # hide until positioned
+        self.adjustSize()
 
-            # Position near cursor but ensure it fits on screen
-            cx, cy = root.winfo_pointerx(), root.winfo_pointery()
-            sw = root.winfo_screenwidth()
-            sh = root.winfo_screenheight()
-            max_w = min(500, sw - 40)
-            x = min(cx + 20, sw - max_w - 20)
+        cx, cy = _cursor_pos()
+        if translation:
+            x = min(cx + 20, sw - self.width() - 20)
             y = max(cy - 60, 40)
-            root.geometry(f"+{x}+{y}")
+            if y + self.height() > sh - 40:
+                y = sh - self.height() - 40
+        else:
+            x = cx + 20
+            y = max(cy - 40, 10)
 
-            frame = tk.Frame(root, bg=_SURFACE, bd=1, relief="solid",
-                             highlightbackground=_ACCENT, highlightthickness=2)
-            frame.pack(padx=2, pady=2)
+        self.move(x, y)
+        self.show()
+        _noactivate(int(self.winId()))
 
-            # Header — NOTE: pady must be an int in Label; use pack() for tuples
-            header = tk.Label(frame, text="Translation", fg=_ACCENT, bg=_SURFACE,
-                              font=("Segoe UI Semibold", 10), padx=12,
-                              anchor="w")
-            header.pack(fill="x", pady=(6, 0))
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.timeout.connect(self._fade)
+        t.start(duration_ms)
 
-            # Translation text — wrapping label
-            label = tk.Label(frame, text=message, fg=_TEXT, bg=_SURFACE,
-                             font=("Segoe UI", 13), padx=16,
-                             wraplength=max_w - 40, justify="left", anchor="w")
-            label.pack(fill="x", pady=(4, 12))
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect().adjusted(1, 1, -1, -1)), 8, 8)
+        p.fillPath(path, QColor(_SURFACE))
+        border_color = _ACCENT if self._translation else _BORDER
+        p.setPen(QPen(QColor(border_color), 1.5 if self._translation else 1.0))
+        p.drawPath(path)
 
-            # Copied indicator
-            hint = tk.Label(frame, text="copied to clipboard  •  click to close",
-                            fg=_MUTED, bg=_SURFACE,
-                            font=("Segoe UI", 9), padx=12, anchor="w")
-            hint.pack(fill="x", pady=(0, 6))
+    def mousePressEvent(self, _e):
+        if self._translation:
+            self.close()
 
-            # Adjust position if window goes off bottom of screen
-            root.update_idletasks()
-            wh = root.winfo_reqheight()
-            if y + wh > sh - 40:
-                y = sh - wh - 40
-                root.geometry(f"+{x}+{y}")
+    def _fade(self):
+        op = self.windowOpacity() - 0.07
+        if op <= 0:
+            self.close()
+            return
+        self.setWindowOpacity(op)
+        QTimer.singleShot(30, self._fade)
 
-            # ── Critical: prevent toast from stealing keyboard focus ──
-            _make_noactivate(root)
 
-            root.deiconify()  # show after positioning
-            log.debug("Translation toast shown at (%d, %d), duration=%dms", x, y, duration_ms)
+class _ToastManager(QObject):
+    """Lives on the Qt main thread; shows toasts on behalf of background threads."""
+    _plain_sig = Signal(str, int)
+    _trans_sig = Signal(str, int)
 
-            # Click to dismiss
-            def _dismiss(e=None):
-                try:
-                    root.destroy()
-                except Exception:
-                    pass
+    def __init__(self):
+        super().__init__()
+        self._plain_sig.connect(self._on_plain)
+        self._trans_sig.connect(self._on_trans)
 
-            for w in (root, frame, label, header, hint):
-                w.bind("<Button-1>", _dismiss)
+    @Slot(str, int)
+    def _on_plain(self, msg: str, ms: int):
+        _Toast(msg, ms, translation=False)
 
-            # Escape to dismiss
-            root.bind("<Escape>", _dismiss)
+    @Slot(str, int)
+    def _on_trans(self, msg: str, ms: int):
+        _Toast(msg, ms, translation=True)
 
-            def fade_out(alpha=0.95):
-                try:
-                    alpha -= 0.05
-                    if alpha <= 0:
-                        root.destroy()
-                        return
-                    root.attributes("-alpha", alpha)
-                    root.after(30, fade_out, alpha)
-                except Exception:
-                    pass
 
-            root.after(duration_ms, fade_out)
-            root.mainloop()
-        except Exception as e:
-            log.error("show_translation_toast error: %s\n%s", e, traceback.format_exc())
-    threading.Thread(target=_run, daemon=True).start()
+_manager: Optional[_ToastManager] = None
+
+
+def setup_notifications() -> _ToastManager:
+    """Create the singleton. Must be called from the Qt main thread in main.py."""
+    global _manager
+    if _manager is None:
+        _manager = _ToastManager()
+    return _manager
+
+
+def show_toast(message: str, duration_ms: int = 2000):
+    if _manager is not None:
+        _manager._plain_sig.emit(message, duration_ms)
+    else:
+        log.warning("show_toast called before setup_notifications: %s", message)
+
+
+def show_translation_toast(message: str, duration_ms: int = 5000):
+    if _manager is not None:
+        _manager._trans_sig.emit(message, duration_ms)
+    else:
+        log.warning("show_translation_toast before setup_notifications: %s", message)

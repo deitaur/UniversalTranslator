@@ -84,10 +84,10 @@ def _engine_display_name():
         g.current_engine, g.current_engine)
 
 def _tray_title_suffix():
-    from utils.language import get_target_lang
-    tgt  = get_target_lang()
-    flag = _LANG_FLAGS.get(tgt, "")
-    return f"  {flag} →{tgt.upper()}" if flag else f"  →{tgt.upper()}"
+    from utils.language import get_target_lang, get_source_lang
+    src = get_source_lang().upper()
+    tgt = get_target_lang().upper()
+    return f"  {src} → {tgt}"
 
 def _compute_icon_and_tooltip():
     """Return (PIL Image, tooltip str) for current app state."""
@@ -216,6 +216,10 @@ def _build_qt_menu(callbacks: dict) -> QMenu:
     menu.addMenu(engine_menu)
 
     menu.addSeparator()
+
+    a = QAction("📞  Voice Chat", menu)
+    a.triggered.connect(callbacks["voice_chat_dialog"])
+    menu.addAction(a)
 
     a = QAction("Voice to Text  (Ctrl+Alt+W)", menu)
     a.triggered.connect(callbacks["whisper"])

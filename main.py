@@ -40,11 +40,13 @@ from ui.icon_generator import generate_app_icon
 from ui.tray_menu import create_tray_icon, update_tray_icon, rebuild_menu
 from ui.popup_window import show_translation_popup
 from ui.settings_window import show_settings_window
-from ui.notifications import show_toast, show_translation_toast
+from ui.notifications import show_toast, show_translation_toast, setup_notifications
+from ui.popup_window import setup_popup
+from ui.chat_window import setup_chat, show_chat_window
+from ui.voice_chat_dialog import show_voice_chat_dialog
 from services.ai.whisper import on_tray_whisper
 from services.ai.dictation import on_hotkey_dictation
 from services.ai.voice_chat import on_hotkey_voicechat, setup_hud as setup_vc_hud
-from ui.chat_window import show_chat_window
 from utils.language import get_source_lang
 
 log.info("All imports OK")
@@ -129,6 +131,7 @@ def on_hotkey_replace():
     text = _grab_selected_text()
     if not text.strip():
         log.debug("No text selected, skipping")
+        show_toast("Select text first (Ctrl+Alt+R)", 2000)
         return
 
     log.debug("Text (%d chars): %s...", len(text), text[:50])
@@ -311,6 +314,12 @@ def main():
 
         threading.Thread(target=hotkey_listener, daemon=True).start()
         threading.Thread(target=usage_refresh_loop, daemon=True).start()
+
+        if config.get("bridge_enabled", False):
+            from services.bridge.server import start_bridge
+            threading.Thread(target=start_bridge, daemon=True).start()
+            log.info("Mobile bridge thread started")
+
         log.info("Background threads started")
 
         # Check and set up Windows Startup shortcut based on configuration
@@ -322,13 +331,17 @@ def main():
         app = QApplication.instance() or QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
 
-        setup_vc_hud()   # create VoiceChatHud singleton on the Qt main thread
+        setup_notifications()   # toast manager must live on the Qt main thread
+        setup_popup()           # translation popup controller
+        setup_chat()            # chat window controller
+        setup_vc_hud()          # voice chat HUD
 
         create_tray_icon({
             "translate_clipboard": on_tray_translate,
             "settings":            on_tray_settings,
             "whisper":             on_tray_whisper,
             "role_chat":           on_tray_role_chat,
+            "voice_chat_dialog":   show_voice_chat_dialog,
             "quit":                on_tray_quit,
         })
         log.info("Tray icon created, entering Qt event loop")

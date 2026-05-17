@@ -1,529 +1,698 @@
-"""
-Settings window for configuration
-"""
+"""Settings window — ZBrush-style compact collapsible layout."""
 
 import datetime as _dt
 import os
 import sys
 import threading
 from pathlib import Path
-import customtkinter as ctk
-from config import APP_NAME, APP_VERSION, CONFIG_DIR, ICON_FILE, C, config, save_config_full
+
+from PySide6.QtCore import QTimer, Qt, Signal, Slot
+from PySide6.QtGui import QFont, QIcon
+from PySide6.QtWidgets import (
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
+    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+)
+
+from config import APP_NAME, APP_VERSION, ICON_FILE, C, config, save_config_full
 from utils.language import LANGUAGES
 from win32.hotkeys import DEFAULT_HOTKEYS, parse_hotkey_string
 
-def show_settings_window(current_engine, update_tray_icon, rebuild_menu):
-    """Display the settings window."""
-    import logging, traceback
-    _log = logging.getLogger("settings")
 
-    def _run():
-      try:
-        _log.info("Settings window opening...")
-        ctk.set_appearance_mode("dark")
-        win = ctk.CTk()
-        win.title(f"{APP_NAME} - Settings")
-        win.geometry("860x600")
-        win.minsize(780, 520)
-        win.resizable(True, True)
-        win.attributes("-topmost", True)
-        win.configure(fg_color=C["bg"])
+# ── Style constants ────────────────────────────────────────────────────────────
 
+_F_LABEL  = QFont("Segoe UI", 9)
+_F_INPUT  = QFont("Consolas", 9)
+_F_HDR    = QFont("Segoe UI Semibold", 9)
+_F_MONO   = QFont("Consolas", 8)
+
+_SS_INPUT = (
+    f"QLineEdit {{ background: {C['card_alt']}; color: {C['text']};"
+    f" border: 1px solid {C['border']}; border-radius: 3px;"
+    f" padding: 1px 5px; min-height: 20px; }}"
+)
+_SS_COMBO = (
+    f"QComboBox {{ background: {C['card_alt']}; color: {C['text']};"
+    f" border: 1px solid {C['border']}; border-radius: 3px;"
+    f" padding: 1px 5px; min-height: 20px; }}"
+    f"QComboBox::drop-down {{ border: none; }}"
+    f"QComboBox QAbstractItemView {{ background: {C['card']}; color: {C['text']}; }}"
+)
+_SS_CHECK = (
+    f"QCheckBox {{ color: {C['text']}; background: transparent; font-size: 9px; }}"
+)
+_SS_RADIO = (
+    f"QRadioButton {{ color: {C['text']}; background: transparent; font-size: 9px; }}"
+)
+
+
+# ── Collapsible Section ────────────────────────────────────────────────────────
+
+class _Section(QWidget):
+    """ZBrush-style collapsible section with ▸/▾ header button."""
+
+    def __init__(self, title: str, parent=None, expanded: bool = False):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Header button
+        self._btn = QPushButton()
+        self._btn.setCheckable(True)
+        self._btn.setChecked(expanded)
+        self._btn.setFixedHeight(22)
+        self._btn.setFont(_F_HDR)
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.setStyleSheet(
+            f"QPushButton {{ background: {C['surface']}; color: {C['text']};"
+            f" border: none; border-top: 1px solid {C['border']};"
+            f" text-align: left; padding-left: 8px; }}"
+            f"QPushButton:hover {{ background: {C['card']}; }}"
+        )
+        self._set_title(title, expanded)
+        self._btn.toggled.connect(self._toggle)
+        outer.addWidget(self._btn)
+
+        # Body
+        self._body = QWidget()
+        self._body.setStyleSheet(
+            f"background: {C['bg']};"
+            f"QLabel {{ background: transparent; border: none; color: {C['text']}; }}"
+        )
+        self._body_lo = QVBoxLayout(self._body)
+        self._body_lo.setContentsMargins(10, 4, 8, 6)
+        self._body_lo.setSpacing(3)
+        self._body.setVisible(expanded)
+        outer.addWidget(self._body)
+
+        self._title = title
+
+    def _set_title(self, title: str, expanded: bool):
+        arrow = "▾" if expanded else "▸"
+        self._btn.setText(f"  {arrow}  {title}")
+
+    def _toggle(self, checked: bool):
+        self._body.setVisible(checked)
+        self._set_title(self._title, checked)
+
+    def add(self, widget: QWidget):
+        self._body_lo.addWidget(widget)
+
+    def add_layout(self, lo):
+        self._body_lo.addLayout(lo)
+
+    def add_spacing(self, n: int = 4):
+        self._body_lo.addSpacing(n)
+
+
+# ── Tiny helpers ───────────────────────────────────────────────────────────────
+
+def _lbl(text: str, color: str = None, bold: bool = False) -> QLabel:
+    w = QLabel(text)
+    f = QFont("Segoe UI Semibold" if bold else "Segoe UI", 9)
+    w.setFont(f)
+    w.setStyleSheet(f"color: {color or C['subtext']}; background: transparent; border: none;")
+    return w
+
+
+def _input(text: str = "", placeholder: str = "", mono: bool = False, pw: bool = False) -> QLineEdit:
+    w = QLineEdit(text)
+    w.setFont(_F_INPUT if mono else _F_LABEL)
+    if placeholder:
+        w.setPlaceholderText(placeholder)
+    if pw:
+        w.setEchoMode(QLineEdit.EchoMode.Password)
+    w.setStyleSheet(_SS_INPUT)
+    w.setFixedHeight(22)
+    return w
+
+
+def _combo(items: list[str], current: str = "") -> QComboBox:
+    w = QComboBox()
+    w.setFont(_F_LABEL)
+    w.addItems(items)
+    if current:
+        w.setCurrentText(current)
+    w.setStyleSheet(_SS_COMBO)
+    w.setFixedHeight(22)
+    return w
+
+
+def _btn(text: str, bg: str = None, fg: str = None, height: int = 22) -> QPushButton:
+    b = QPushButton(text)
+    b.setFont(_F_LABEL)
+    b.setFixedHeight(height)
+    _bg = bg or C["card_alt"]
+    _fg = fg or C["text"]
+    b.setStyleSheet(
+        f"QPushButton {{ background: {_bg}; color: {_fg}; border: 1px solid {C['border']};"
+        f" border-radius: 3px; padding: 0 8px; }}"
+        f"QPushButton:hover {{ background: {C['surface']}; }}"
+        f"QPushButton:disabled {{ color: {C['muted']}; }}"
+    )
+    return b
+
+
+def _row(*widgets, stretch: bool = True) -> QHBoxLayout:
+    lo = QHBoxLayout()
+    lo.setContentsMargins(0, 0, 0, 0)
+    lo.setSpacing(4)
+    for w in widgets:
+        if isinstance(w, int):
+            lo.addSpacing(w)
+        elif isinstance(w, QWidget):
+            lo.addWidget(w)
+        else:
+            lo.addLayout(w)
+    if stretch:
+        lo.addStretch()
+    return lo
+
+
+# ── Main window ────────────────────────────────────────────────────────────────
+
+class SettingsWindow(QWidget):
+
+    _ai_load_sig = Signal(bool)
+
+    def __init__(self, current_engine: str, update_tray_icon, rebuild_menu):
+        super().__init__(None, Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._current_engine = current_engine
+        self._update_tray    = update_tray_icon
+        self._rebuild_menu   = rebuild_menu
+
+        self.setWindowTitle(f"{APP_NAME} — Settings")
+        self.resize(460, 580)
+        self.setMinimumSize(380, 420)
+        self.setStyleSheet(
+            f"QWidget {{ background: {C['bg']}; color: {C['text']}; }}"
+            f"QScrollArea {{ border: none; }}"
+        )
         if ICON_FILE.exists():
-            try:
-                win.iconbitmap(str(ICON_FILE))
-            except Exception:
-                pass
+            self.setWindowIcon(QIcon(str(ICON_FILE)))
 
-        # ---- Header bar ----
-        hdr = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=0, height=56)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
-        ctk.CTkLabel(hdr, text="Settings", font=("Segoe UI Semibold", 22),
-                     text_color=C["text"]).pack(side="left", padx=24, pady=12)
+        self._ai_load_sig.connect(self._on_ai_load_result)
+        self._build()
+
+    # ── Layout ────────────────────────────────────────────────────────────────
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Mini header
+        hdr = QFrame()
+        hdr.setFixedHeight(32)
+        hdr.setStyleSheet(f"background: {C['surface']}; border-bottom: 1px solid {C['border']};")
+        hdr_lo = QHBoxLayout(hdr)
+        hdr_lo.setContentsMargins(10, 0, 10, 0)
+        title_lbl = QLabel("Settings")
+        title_lbl.setFont(QFont("Segoe UI Semibold", 11))
+        title_lbl.setStyleSheet(f"color: {C['text']}; background: transparent; border: none;")
+        hdr_lo.addWidget(title_lbl)
+        hdr_lo.addStretch()
         try:
-            _src = sys.argv[0] if getattr(sys, "frozen", False) else __file__
-            _ts = _dt.datetime.fromtimestamp(os.path.getmtime(_src)).strftime("%b %d, %Y  %H:%M")
+            src = sys.argv[0] if getattr(sys, "frozen", False) else __file__
+            ts = _dt.datetime.fromtimestamp(os.path.getmtime(src)).strftime("%d %b %Y")
         except Exception:
-            _ts = ""
-        _vt = f"v{APP_VERSION}"
-        if _ts:
-            _vt += f"  |  {_ts}"
-        ctk.CTkLabel(hdr, text=_vt, font=("Segoe UI", 11),
-                     text_color=C["muted"]).pack(side="right", padx=24, pady=12)
+            ts = ""
+        ver_lbl = QLabel(f"v{APP_VERSION}" + (f"  {ts}" if ts else ""))
+        ver_lbl.setFont(QFont("Segoe UI", 8))
+        ver_lbl.setStyleSheet(f"color: {C['muted']}; background: transparent; border: none;")
+        hdr_lo.addWidget(ver_lbl)
+        root.addWidget(hdr)
 
-        # ---- Scrollable body with two columns ----
-        body = ctk.CTkScrollableFrame(win, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=0, pady=0)
-        cols = ctk.CTkFrame(body, fg_color="transparent")
-        cols.pack(fill="both", expand=True, padx=12, pady=(10, 10))
-        left = ctk.CTkFrame(cols, fg_color="transparent")
-        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        right = ctk.CTkFrame(cols, fg_color="transparent")
-        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        # Scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {C['bg']};")
+        inner_lo = QVBoxLayout(inner)
+        inner_lo.setContentsMargins(0, 0, 0, 0)
+        inner_lo.setSpacing(0)
+        scroll.setWidget(inner)
+        root.addWidget(scroll, 1)
 
-        # ============== LEFT COLUMN ==============
+        # Save button
+        self._save_btn = QPushButton("Save")
+        self._save_btn.setFont(QFont("Segoe UI Semibold", 10))
+        self._save_btn.setFixedHeight(30)
+        self._save_btn.setStyleSheet(
+            f"QPushButton {{ background: {C['accent']}; color: {C['bg']}; border: none; }}"
+            f"QPushButton:hover {{ background: #7ba4e8; }}"
+        )
+        self._save_btn.clicked.connect(self._save)
+        root.addWidget(self._save_btn)
 
-        # --- Engine ---
-        ef = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        ef.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(ef, text="Translation Engine", font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 8), anchor="w")
-        engine_var = ctk.StringVar(value=current_engine)
+        self._build_sections(inner_lo)
+        inner_lo.addStretch()
 
-        def on_engine(val):
-            nonlocal current_engine
-            if val == "deepl" and not config.get("api_key"):
-                engine_var.set(current_engine)
-                key_entry.focus()
-                return
-            if val == "yandex" and not config.get("yandex_api_key"):
-                engine_var.set(current_engine)
-                yandex_key_entry.focus()
-                return
-            current_engine = val
-            import globals as g
-            g.current_engine = val
-            config["engine"] = val
-            save_config_full()
-            if val == "deepl":
+    def _build_sections(self, lo: QVBoxLayout):
+        _code_to_name = {code: name for code, name in LANGUAGES.items()}
+        _name_to_code = {name: code for code, name in LANGUAGES.items()}
+        _lang_names   = list(LANGUAGES.values())
+        self._name_to_code = _name_to_code
+
+        # ── Translation Engine ─────────────────────────────────────────────
+        s = _Section("Translation Engine", expanded=True)
+        lo.addWidget(s)
+        self._engine_group = QButtonGroup(self)
+        for ev, el, ec in [("deepl", "DeepL", C["accent"]),
+                            ("google", "Google (free)", C["green"]),
+                            ("yandex", "Yandex (free)", C["yellow"])]:
+            rb = QRadioButton(el)
+            rb.setFont(_F_LABEL)
+            rb.setChecked(ev == self._current_engine)
+            rb.setStyleSheet(
+                f"QRadioButton {{ color: {C['text']}; background: transparent; }}"
+                f"QRadioButton::indicator:checked {{ background: {ec};"
+                f" border: 2px solid {ec}; border-radius: 5px; }}"
+            )
+            rb.toggled.connect(lambda checked, v=ev: checked and self._on_engine(v))
+            self._engine_group.addButton(rb)
+            s.add(rb)
+
+        # ── Languages ─────────────────────────────────────────────────────
+        s = _Section("Languages", expanded=True)
+        lo.addWidget(s)
+        s.add(_lbl("Source (your language):"))
+        self._src_combo = _combo(_lang_names, _code_to_name.get(config.get("source_lang", "ru"), "Russian"))
+        s.add(self._src_combo)
+        s.add_spacing(2)
+        s.add(_lbl("Target (translate to):"))
+        _SAME = "(Same as source)"
+        self._tgt_combo = _combo([_SAME] + _lang_names)
+        tgt_code = config.get("target_lang", "")
+        self._tgt_combo.setCurrentText(_code_to_name.get(tgt_code, _SAME) if tgt_code else _SAME)
+        s.add(self._tgt_combo)
+
+        # ── API Keys ───────────────────────────────────────────────────────
+        s = _Section("API Keys")
+        lo.addWidget(s)
+        s.add(_lbl("DeepL API Key:"))
+        self._deepl_key = _input(config.get("api_key", ""), "Enter DeepL key…", mono=True, pw=True)
+        s.add(self._deepl_key)
+        s.add(_lbl("Yandex API Key:"))
+        self._yandex_key = _input(config.get("yandex_api_key", ""), "Enter Yandex key…", mono=True, pw=True)
+        s.add(self._yandex_key)
+        s.add(_lbl("Yandex Folder ID:"))
+        self._yandex_folder = _input(config.get("yandex_folder_id", ""), "Folder ID…", mono=True)
+        s.add(self._yandex_folder)
+
+        # ── Mobile Bridge ─────────────────────────────────────────────────
+        s = _Section("Mobile Bridge")
+        lo.addWidget(s)
+        s.add(_lbl("Connect the phone app over WiFi / Tailscale VPN.", color=C["muted"]))
+        s.add_spacing(2)
+
+        self._bridge_cb = QCheckBox("Enable Mobile Bridge")
+        self._bridge_cb.setFont(_F_LABEL)
+        self._bridge_cb.setChecked(config.get("bridge_enabled", False))
+        self._bridge_cb.setStyleSheet(_SS_CHECK)
+        s.add(self._bridge_cb)
+
+        port_row = QHBoxLayout()
+        port_row.setContentsMargins(0, 0, 0, 0)
+        port_row.setSpacing(4)
+        port_row.addWidget(_lbl("Port:"))
+        self._bridge_port = _input(str(config.get("bridge_port", 8082)), mono=True)
+        self._bridge_port.setFixedWidth(70)
+        port_row.addWidget(self._bridge_port)
+        port_row.addStretch()
+        s.add_layout(port_row)
+
+        tok_row = QHBoxLayout()
+        tok_row.setContentsMargins(0, 0, 0, 0)
+        tok_row.setSpacing(4)
+        tok_row.addWidget(_lbl("Token:"))
+        from services.bridge.auth import get_or_create_token
+        tok = get_or_create_token()
+        self._bridge_tok_lbl = QLabel(tok[:18] + "…")
+        self._bridge_tok_lbl.setFont(_F_MONO)
+        self._bridge_tok_lbl.setStyleSheet(f"color: {C['muted']}; background: transparent; border: none;")
+        tok_row.addWidget(self._bridge_tok_lbl, 1)
+        copy_tok_btn = _btn("Copy", height=20)
+        copy_tok_btn.setFixedWidth(46)
+        copy_tok_btn.clicked.connect(lambda: self._copy_token(tok))
+        tok_row.addWidget(copy_tok_btn)
+        s.add_layout(tok_row)
+
+        ip_row = QHBoxLayout()
+        ip_row.setContentsMargins(0, 0, 0, 0)
+        ip_row.setSpacing(4)
+        ip_row.addWidget(_lbl("PC IP:"))
+        self._ip_combo = _combo(self._get_all_ips())
+        self._ip_combo.setFont(_F_MONO)
+        self._ip_combo.currentTextChanged.connect(lambda _: self._refresh_qr())
+        ip_row.addWidget(self._ip_combo, 1)
+        s.add_layout(ip_row)
+
+        self._qr_lbl = QLabel()
+        self._qr_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._qr_lbl.setFixedHeight(120)
+        self._qr_lbl.setStyleSheet(
+            f"background: {C['card_alt']}; border-radius: 4px; color: {C['muted']};"
+        )
+        s.add(self._qr_lbl)
+
+        qr_btn = _btn("Refresh QR", C["accent"], C["bg"], height=22)
+        qr_btn.clicked.connect(self._refresh_qr)
+        s.add(qr_btn)
+
+        self._refresh_qr()
+
+        # ── AI / Ollama ────────────────────────────────────────────────────
+        s = _Section("AI / Ollama")
+        lo.addWidget(s)
+        s.add(_lbl("Model:"))
+        self._ollama_entry = _input(config.get("ollama_model", "qwen2.5:14b"), "e.g. qwen2.5:14b", mono=True)
+        s.add(self._ollama_entry)
+        s.add(_lbl("Response language:"))
+        self._neg_lang_combo = _combo(["Same as input", "English", "Russian"],
+                                      config.get("negotiator_lang", "Same as input"))
+        s.add(self._neg_lang_combo)
+        s.add_spacing(2)
+        roles_btn = _btn("Manage Roles…", height=22)
+        roles_btn.clicked.connect(self._open_role_editor)
+        self._load_btn = _btn("Load into RAM", height=22)
+        self._load_btn.clicked.connect(self._on_load_ai)
+        s.add_layout(_row(roles_btn, self._load_btn))
+
+        # ── Voice & TTS ────────────────────────────────────────────────────
+        s = _Section("Voice & TTS")
+        lo.addWidget(s)
+        from services.ai.tts import gtts_installed
+        _gtts_ok = gtts_installed()
+        _tts_opts = ["Google (gTTS)" if _gtts_ok else "Google (pip install gtts)", "Windows SAPI"]
+        self._tts_stored = {
+            "Google (gTTS)": "gtts",
+            "Google (pip install gtts)": "gtts",
+            "Windows SAPI": "sapi",
+        }
+        _tts_display = {
+            "gtts": "Google (gTTS)" if _gtts_ok else "Google (pip install gtts)",
+            "sapi": "Windows SAPI",
+        }
+        tts_row = QHBoxLayout()
+        tts_row.setContentsMargins(0, 0, 0, 0)
+        tts_row.setSpacing(4)
+        tts_row.addWidget(_lbl("Engine:"))
+        self._tts_combo = _combo(_tts_opts, _tts_display.get(config.get("tts_engine", "gtts"), "Google (gTTS)"))
+        if not _gtts_ok:
+            self._tts_combo.setEnabled(False)
+        tts_row.addWidget(self._tts_combo, 1)
+        self._tts_test_btn = _btn("▶ Test", height=22)
+        self._tts_test_btn.setFixedWidth(52)
+        self._tts_test_btn.clicked.connect(self._test_tts)
+        tts_row.addWidget(self._tts_test_btn)
+        s.add_layout(tts_row)
+
+        # ── Dictation ─────────────────────────────────────────────────────
+        s = _Section("Dictation  (Ctrl+Alt+D)")
+        lo.addWidget(s)
+        s.add(_lbl("Save folder:"))
+        _default = str(Path.home() / "Documents" / "Dictations")
+        folder_row = QHBoxLayout()
+        folder_row.setContentsMargins(0, 0, 0, 0)
+        folder_row.setSpacing(4)
+        self._dict_folder = _input(config.get("dictation_folder", _default))
+        folder_row.addWidget(self._dict_folder, 1)
+        browse_btn = _btn("…", height=22)
+        browse_btn.setFixedWidth(26)
+        browse_btn.clicked.connect(self._browse_folder)
+        folder_row.addWidget(browse_btn)
+        s.add_layout(folder_row)
+
+        fmt_row = QHBoxLayout()
+        fmt_row.setContentsMargins(0, 0, 0, 0)
+        fmt_row.setSpacing(6)
+        fmt_row.addWidget(_lbl("Format:"))
+        _fmt_display = {"md": "Markdown (.md)", "txt": "Text (.txt)"}
+        self._fmt_stored = {"Markdown (.md)": "md", "Text (.txt)": "txt"}
+        self._fmt_combo = _combo(["Markdown (.md)", "Text (.txt)"],
+                                  _fmt_display.get(config.get("dictation_format", "md"), "Markdown (.md)"))
+        fmt_row.addWidget(self._fmt_combo)
+        self._obsidian_cb = QCheckBox("Obsidian frontmatter")
+        self._obsidian_cb.setFont(_F_LABEL)
+        self._obsidian_cb.setChecked(config.get("dictation_obsidian", True))
+        self._obsidian_cb.setStyleSheet(_SS_CHECK)
+        fmt_row.addWidget(self._obsidian_cb)
+        fmt_row.addStretch()
+        s.add_layout(fmt_row)
+
+        tags_row = QHBoxLayout()
+        tags_row.setContentsMargins(0, 0, 0, 0)
+        tags_row.setSpacing(6)
+        tags_row.addWidget(_lbl("Tags:"))
+        self._tags_entry = _input(config.get("dictation_tags", "dictation"), "dictation, notes")
+        tags_row.addWidget(self._tags_entry, 1)
+        s.add_layout(tags_row)
+
+        # ── Hotkeys ────────────────────────────────────────────────────────
+        s = _Section("Hotkeys")
+        lo.addWidget(s)
+        self._hotkey_entries = {}
+        for name, label in [
+            ("popup",      "Show Popup"),
+            ("replace",    "Replace Text"),
+            ("clipboard",  "Translate Clipboard"),
+            ("whisper",    "Voice → Text"),
+            ("dictation",  "Voice Dictation"),
+            ("voicechat",  "Voice AI Chat"),
+            ("negotiator", "Negotiator"),
+            ("teacher",    "English Teacher"),
+        ]:
+            hk_row = QHBoxLayout()
+            hk_row.setContentsMargins(0, 0, 0, 0)
+            hk_row.setSpacing(4)
+            lbl_w = QLabel(label)
+            lbl_w.setFont(_F_LABEL)
+            lbl_w.setFixedWidth(130)
+            lbl_w.setStyleSheet(f"color: {C['subtext']}; background: transparent; border: none;")
+            hk_row.addWidget(lbl_w)
+            entry = _input(config.get(f"hotkey_{name}", DEFAULT_HOTKEYS.get(name, "")),
+                           "Ctrl+Alt+…", mono=True)
+            hk_row.addWidget(entry, 1)
+            s.add_layout(hk_row)
+            self._hotkey_entries[name] = entry
+
+        # ── System ────────────────────────────────────────────────────────
+        s = _Section("System")
+        lo.addWidget(s)
+        self._autostart_cb = QCheckBox("Start with Windows")
+        self._autostart_cb.setFont(_F_LABEL)
+        self._autostart_cb.setChecked(config.get("autostart", False))
+        self._autostart_cb.setStyleSheet(_SS_CHECK)
+        s.add(self._autostart_cb)
+
+        self._clipboard_cb = QCheckBox("Clipboard-only mode (no text selection)")
+        self._clipboard_cb.setFont(_F_LABEL)
+        self._clipboard_cb.setChecked(config.get("clipboard_only", False))
+        self._clipboard_cb.setStyleSheet(_SS_CHECK)
+        s.add(self._clipboard_cb)
+
+        self._direct_cb = QCheckBox("Direct type replacement (no clipboard)")
+        self._direct_cb.setFont(_F_LABEL)
+        self._direct_cb.setChecked(config.get("direct_type", False))
+        self._direct_cb.setStyleSheet(_SS_CHECK)
+        s.add(self._direct_cb)
+
+    # ── IP helpers ────────────────────────────────────────────────────────────
+
+    def _get_all_ips(self) -> list[str]:
+        import socket
+        ips = []
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = info[4][0]
+                if not ip.startswith("127."):
+                    ips.append(ip)
+        except Exception:
+            pass
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            default_ip = s.getsockname()[0]
+            s.close()
+            if default_ip not in ips:
+                ips.insert(0, default_ip)
+        except Exception:
+            pass
+        return ips or ["127.0.0.1"]
+
+    def _get_local_ip(self) -> str:
+        return self._get_all_ips()[0]
+
+    # ── Slots / callbacks ─────────────────────────────────────────────────────
+
+    def _copy_token(self, tok: str):
+        from win32.clipboard import set_clipboard_text
+        set_clipboard_text(tok)
+        from ui.notifications import show_toast
+        show_toast("Token copied", 1500)
+
+    def _refresh_qr(self):
+        try:
+            import qrcode
+            from PySide6.QtGui import QImage, QPixmap
+        except ImportError:
+            self._qr_lbl.setText("pip install qrcode[pil]")
+            return
+
+        from services.bridge.auth import get_or_create_token
+        ip   = self._ip_combo.currentText() if hasattr(self, "_ip_combo") else self._get_local_ip()
+        port = self._bridge_port.text().strip() or "8082"
+        tok  = get_or_create_token()
+        url  = f"ws://{ip}:{port}/?token={tok}"
+
+        try:
+            qr = qrcode.QRCode(box_size=3, border=2)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="white", back_color="#181825")
+            img_rgb = img.convert("RGB")
+            w, h = img_rgb.size
+            data = img_rgb.tobytes("raw", "RGB")
+            qimage = QImage(data, w, h, w * 3, QImage.Format.Format_RGB888)
+            pix = QPixmap.fromImage(qimage).scaled(
+                110, 110,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._qr_lbl.setPixmap(pix)
+            self._qr_lbl.setToolTip(url)
+        except Exception as e:
+            self._qr_lbl.setText(f"QR error: {e}")
+
+    def _on_engine(self, val: str):
+        if val == "deepl" and not config.get("api_key"):
+            self._deepl_key.setFocus()
+        if val == "yandex" and not config.get("yandex_api_key"):
+            self._yandex_key.setFocus()
+        self._current_engine = val
+        import globals as g
+        g.current_engine = val
+        config["engine"] = val
+        save_config_full()
+        if val == "deepl":
+            try:
                 from services.translators.deepl import DeepLEngine
                 engine = DeepLEngine()
                 count, limit = engine.get_usage()
                 from globals import usage_data
                 usage_data["character_count"] = count
                 usage_data["character_limit"] = limit
-            update_tray_icon()
-            rebuild_menu()
-
-        for ev, el, ec in [("deepl", "DeepL", C["accent"]),
-                           ("google", "Google (free)", C["green"]),
-                           ("yandex", "Yandex (free)", C["yellow"])]:
-            ctk.CTkRadioButton(ef, text=el, variable=engine_var, value=ev,
-                                command=lambda v=ev: on_engine(v),
-                                font=("Segoe UI", 12), text_color=C["text"],
-                                fg_color=ec, hover_color=ec,
-                                border_color=C["border"]).pack(padx=14, anchor="w", pady=2)
-        ctk.CTkFrame(ef, fg_color="transparent", height=6).pack()
-
-        # Maps: code → display name, display name → code
-        _code_to_name = {code: name for code, name in LANGUAGES.items()}
-        _name_to_code = {name: code for code, name in LANGUAGES.items()}
-        _lang_names   = list(LANGUAGES.values())   # ["Russian", "Spanish", …]
-
-        # --- Source Language ---
-        lf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        lf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(lf, text="Ваш язык (исходный)",
-                     font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(lf, text="Язык, на котором вы обычно пишете. При авто-определении — направление обратного перевода.",
-                     font=("Segoe UI", 10), text_color=C["muted"],
-                     wraplength=340, justify="left").pack(padx=14, anchor="w")
-
-        _src_code = config.get("source_lang", "ru")
-        lang_var  = ctk.StringVar(value=_code_to_name.get(_src_code, _src_code))
-        lang_combo = ctk.CTkComboBox(lf, variable=lang_var,
-                                     values=_lang_names,
-                                     font=("Segoe UI", 12), text_color=C["text"],
-                                     fg_color=C["card"], button_color=C["accent"],
-                                     border_color=C["border"], dropdown_fg_color=C["card"],
-                                     dropdown_text_color=C["text"], dropdown_hover_color=C["surface"],
-                                     command=lambda v: None)   # live update via StringVar
-        lang_combo.pack(padx=14, pady=(6, 12), fill="x")
-
-        # --- Target Language ---
-        tf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        tf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(tf, text="Переводить на язык",
-                     font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(tf, text="Язык перевода по умолчанию. Например, выберите English — и всё будет переводиться в английский.",
-                     font=("Segoe UI", 10), text_color=C["muted"],
-                     wraplength=340, justify="left").pack(padx=14, anchor="w")
-
-        _SAME = "(Same as source)"
-        _tgt_code   = config.get("target_lang", "")
-        _tgt_display = _code_to_name.get(_tgt_code, _SAME) if _tgt_code else _SAME
-        target_var  = ctk.StringVar(value=_tgt_display)
-        target_combo = ctk.CTkComboBox(tf, variable=target_var,
-                                       values=[_SAME] + _lang_names,
-                                       font=("Segoe UI", 12), text_color=C["text"],
-                                       fg_color=C["card"], button_color=C["accent"],
-                                       border_color=C["border"], dropdown_fg_color=C["card"],
-                                       dropdown_text_color=C["text"], dropdown_hover_color=C["surface"],
-                                       command=lambda v: None)  # live update via StringVar
-        target_combo.pack(padx=14, pady=(6, 12), fill="x")
-
-        # --- API Keys ---
-        kf = ctk.CTkFrame(left, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        kf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(kf, text="API Keys", font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 8), anchor="w")
-
-        # DeepL Key
-        ctk.CTkLabel(kf, text="DeepL API Key:", font=("Segoe UI", 12),
-                     text_color=C["subtext"]).pack(padx=14, anchor="w")
-        key_entry = ctk.CTkEntry(kf, font=("Consolas", 11), text_color=C["text"],
-                                 fg_color=C["card"], border_color=C["border"],
-                                 show="•", placeholder_text="Enter DeepL API key...")
-        key_entry.pack(padx=14, pady=(0, 8), fill="x")
-        key_entry.insert(0, config.get("api_key", ""))
-
-        # Yandex Key
-        ctk.CTkLabel(kf, text="Yandex API Key:", font=("Segoe UI", 12),
-                     text_color=C["subtext"]).pack(padx=14, anchor="w")
-        yandex_key_entry = ctk.CTkEntry(kf, font=("Consolas", 11), text_color=C["text"],
-                                        fg_color=C["card"], border_color=C["border"],
-                                        show="•", placeholder_text="Enter Yandex API key...")
-        yandex_key_entry.pack(padx=14, pady=(0, 8), fill="x")
-        yandex_key_entry.insert(0, config.get("yandex_api_key", ""))
-
-        # Yandex Folder ID
-        ctk.CTkLabel(kf, text="Yandex Folder ID:", font=("Segoe UI", 12),
-                     text_color=C["subtext"]).pack(padx=14, anchor="w")
-        yandex_folder_entry = ctk.CTkEntry(kf, font=("Consolas", 11), text_color=C["text"],
-                                           fg_color=C["card"], border_color=C["border"],
-                                           placeholder_text="Enter Yandex Folder ID...")
-        yandex_folder_entry.pack(padx=14, pady=(0, 12), fill="x")
-        yandex_folder_entry.insert(0, config.get("yandex_folder_id", ""))
-
-        # ============== RIGHT COLUMN ==============
-
-        # --- System Options ---
-        sf = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        sf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(sf, text="System Options", font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 8), anchor="w")
-
-        # Autostart
-        autostart_var = ctk.BooleanVar(value=config.get("autostart", False))
-        ctk.CTkCheckBox(sf, text="Start with Windows", variable=autostart_var,
-                        font=("Segoe UI", 12), text_color=C["text"],
-                        fg_color=C["accent"], hover_color=C["accent"],
-                        border_color=C["border"]).pack(padx=14, anchor="w", pady=2)
-
-        # Clipboard-only
-        clipboard_var = ctk.BooleanVar(value=config.get("clipboard_only", False))
-        ctk.CTkCheckBox(sf, text="Clipboard-only mode (no text selection)", variable=clipboard_var,
-                        font=("Segoe UI", 12), text_color=C["text"],
-                        fg_color=C["accent"], hover_color=C["accent"],
-                        border_color=C["border"]).pack(padx=14, anchor="w", pady=2)
-
-        # Direct type
-        direct_var = ctk.BooleanVar(value=config.get("direct_type", False))
-        ctk.CTkCheckBox(sf, text="Direct type replacement (no clipboard)", variable=direct_var,
-                        font=("Segoe UI", 12), text_color=C["text"],
-                        fg_color=C["accent"], hover_color=C["accent"],
-                        border_color=C["border"]).pack(padx=14, anchor="w", pady=2)
-
-        # TTS voice engine
-        ctk.CTkFrame(sf, fg_color=C["border"], height=1).pack(fill="x", padx=14, pady=(8, 6))
-        tts_row = ctk.CTkFrame(sf, fg_color="transparent")
-        tts_row.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkLabel(tts_row, text="Голос озвучки:", font=("Segoe UI", 12),
-                     text_color=C["text"]).pack(side="left")
-
-        from services.ai.tts import gtts_installed
-        _gtts_ok = gtts_installed()
-        _tts_options = ["Google (gTTS)" if _gtts_ok else "Google (pip install gtts)", "Windows SAPI"]
-        _tts_stored  = {"Google (gTTS)": "gtts", "Google (pip install gtts)": "gtts", "Windows SAPI": "sapi"}
-        _tts_display = {"gtts": "Google (gTTS)" if _gtts_ok else "Google (pip install gtts)",
-                        "sapi": "Windows SAPI"}
-        tts_engine_var = ctk.StringVar(
-            value=_tts_display.get(config.get("tts_engine", "gtts"), "Google (gTTS)"))
-        tts_combo = ctk.CTkComboBox(tts_row, variable=tts_engine_var,
-                                    values=_tts_options, width=180, height=28,
-                                    font=("Segoe UI", 12), text_color=C["text"],
-                                    fg_color=C["card_alt"], button_color=C["accent"],
-                                    border_color=C["border"], dropdown_fg_color=C["card"],
-                                    dropdown_text_color=C["text"],
-                                    dropdown_hover_color=C["surface"],
-                                    state="normal" if _gtts_ok else "readonly",
-                                    command=lambda v: None)
-        tts_combo.pack(side="left", padx=(10, 0))
-
-        def _test_tts():
-            from services.ai.tts import speak
-            tts_btn.configure(text="▶ …", state="disabled")
-            engine_sel = _tts_stored.get(tts_engine_var.get(), "gtts")
-            from config import config as _cfg
-            _cfg["tts_engine"] = engine_sel
-            speak("Проверка голоса", lang_code="ru")
-            win.after(3000, lambda: tts_btn.configure(text="▶ Тест", state="normal"))
-
-        tts_btn = ctk.CTkButton(tts_row, text="▶ Тест", width=70, height=28,
-                                font=("Segoe UI", 11), fg_color=C["surface"],
-                                text_color=C["accent"], hover_color=C["card_alt"],
-                                corner_radius=6, command=_test_tts)
-        tts_btn.pack(side="left", padx=(8, 0))
-        ctk.CTkFrame(sf, fg_color="transparent", height=8).pack()
-
-        # --- Ollama (Negotiator AI) ---
-        of = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        of.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(of, text="Negotiator AI (Ollama)", font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(of, text="Local model via ollama serve", font=("Segoe UI", 10),
-                     text_color=C["muted"]).pack(padx=14, pady=(0, 8), anchor="w")
-
-        ctk.CTkLabel(of, text="Model name:", font=("Segoe UI", 11),
-                     text_color=C["subtext"]).pack(padx=14, anchor="w")
-        ollama_entry = ctk.CTkEntry(of, font=("Consolas", 11), text_color=C["text"],
-                                     fg_color=C["card_alt"], border_color=C["border"],
-                                     placeholder_text="e.g., qwen2.5:14b, llama3")
-        ollama_entry.pack(padx=14, pady=(0, 8), fill="x")
-        ollama_entry.insert(0, config.get("ollama_model", "qwen2.5:14b"))
-
-        ctk.CTkLabel(of, text="Response language:", font=("Segoe UI", 11),
-                     text_color=C["subtext"]).pack(padx=14, anchor="w")
-        neg_lang_values = ["Same as input", "English", "Russian"]
-        neg_lang_var = ctk.StringVar(value=config.get("negotiator_lang", "Same as input"))
-        neg_lang_combo = ctk.CTkComboBox(of, variable=neg_lang_var,
-                                          values=neg_lang_values,
-                                          font=("Segoe UI", 12), text_color=C["text"],
-                                          fg_color=C["card_alt"], button_color=C["accent"],
-                                          border_color=C["border"], dropdown_fg_color=C["card"],
-                                          dropdown_text_color=C["text"],
-                                          dropdown_hover_color=C["surface"])
-        neg_lang_combo.pack(padx=14, pady=(0, 8), fill="x")
-
-        # AI Buttons Frame
-        ai_btn_frame = ctk.CTkFrame(of, fg_color="transparent")
-        ai_btn_frame.pack(padx=14, pady=(0, 12), fill="x")
-
-        # Manage Roles button
-        ctk.CTkButton(ai_btn_frame, text="Manage AI Roles...", font=("Segoe UI Semibold", 12),
-                       fg_color=C["accent"], text_color=C["bg"],
-                       hover_color="#7ba4e8", corner_radius=8, height=34,
-                       command=lambda: _open_role_editor()
-                       ).pack(side="left", fill="x", expand=True, padx=(0, 6))
-
-        def _on_load_ai():
-            import threading
-            from services.ai.ollama import preload_model
-            
-            # Disable button immediately on main thread
-            load_btn.configure(text="Загрузка...", state="disabled")
-            
-            def task():
-                success = preload_model()
-                if success:
-                    win.after(0, lambda: load_btn.configure(text="ИИ загружен!", state="normal"))
-                    win.after(3000, lambda: load_btn.configure(text="Загрузить ИИ в память"))
-                else:
-                    win.after(0, lambda: load_btn.configure(text="Ошибка", state="normal"))
-                    win.after(3000, lambda: load_btn.configure(text="Загрузить ИИ в память"))
-            threading.Thread(target=task, daemon=True).start()
-
-        load_btn = ctk.CTkButton(ai_btn_frame, text="Загрузить ИИ в память", font=("Segoe UI Semibold", 12),
-                       fg_color=C["accent"], text_color=C["bg"],
-                       hover_color="#7ba4e8", corner_radius=8, height=34,
-                       command=_on_load_ai)
-        load_btn.pack(side="right", fill="x", expand=True, padx=(6, 0))
-
-        # --- Voice Dictation ---
-        df = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        df.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(df, text="Голосовая диктовка  (Ctrl+Alt+D)",
-                     font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 2), anchor="w")
-        ctk.CTkLabel(df, text="Запись голоса → транскрипция → сохранение в файл",
-                     font=("Segoe UI", 10), text_color=C["muted"]).pack(padx=14, anchor="w")
-
-        # Save folder
-        ctk.CTkLabel(df, text="Папка сохранения:", font=("Segoe UI", 11),
-                     text_color=C["subtext"]).pack(padx=14, pady=(10, 2), anchor="w")
-        folder_row = ctk.CTkFrame(df, fg_color="transparent")
-        folder_row.pack(fill="x", padx=14, pady=(0, 6))
-
-        _default_dict_folder = str(Path.home() / "Documents" / "Dictations")
-        dict_folder_var = ctk.StringVar(value=config.get("dictation_folder", _default_dict_folder))
-        dict_folder_entry = ctk.CTkEntry(folder_row, textvariable=dict_folder_var,
-                                          font=("Segoe UI", 11), text_color=C["text"],
-                                          fg_color=C["card_alt"], border_color=C["border"],
-                                          height=28)
-        dict_folder_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
-
-        def _browse_dict_folder():
-            from tkinter import filedialog
-            win.attributes("-topmost", False)
-            folder = filedialog.askdirectory(
-                title="Папка для сохранения диктовок", parent=win,
-                initialdir=dict_folder_var.get() or str(Path.home()))
-            win.attributes("-topmost", True)
-            win.lift()
-            if folder:
-                dict_folder_var.set(folder)
-
-        ctk.CTkButton(folder_row, text="…", width=32, height=28,
-                       font=("Segoe UI", 12), fg_color=C["card_alt"],
-                       text_color=C["text"], hover_color=C["border"],
-                       corner_radius=6, command=_browse_dict_folder).pack(side="left")
-
-        # Format + Obsidian options
-        fmt_row = ctk.CTkFrame(df, fg_color="transparent")
-        fmt_row.pack(fill="x", padx=14, pady=(0, 4))
-
-        ctk.CTkLabel(fmt_row, text="Формат:", font=("Segoe UI", 11),
-                     text_color=C["subtext"]).pack(side="left")
-        _fmt_opts = ["Markdown (.md)", "Текст (.txt)"]
-        _fmt_stored = {"Markdown (.md)": "md", "Текст (.txt)": "txt"}
-        _fmt_display = {"md": "Markdown (.md)", "txt": "Текст (.txt)"}
-        dict_fmt_var = ctk.StringVar(
-            value=_fmt_display.get(config.get("dictation_format", "md"), "Markdown (.md)"))
-        ctk.CTkComboBox(fmt_row, variable=dict_fmt_var, values=_fmt_opts,
-                        width=150, height=26, font=("Segoe UI", 11),
-                        text_color=C["text"], fg_color=C["card_alt"],
-                        button_color=C["accent"], border_color=C["border"],
-                        dropdown_fg_color=C["card"], dropdown_text_color=C["text"],
-                        dropdown_hover_color=C["surface"],
-                        command=lambda v: None).pack(side="left", padx=(8, 0))
-
-        obsidian_var = ctk.BooleanVar(value=config.get("dictation_obsidian", True))
-        ctk.CTkCheckBox(fmt_row, text="Obsidian frontmatter", variable=obsidian_var,
-                        font=("Segoe UI", 11), text_color=C["text"],
-                        fg_color=C["accent"], hover_color=C["accent"],
-                        border_color=C["border"]).pack(side="left", padx=(14, 0))
-
-        # Tags
-        tags_row = ctk.CTkFrame(df, fg_color="transparent")
-        tags_row.pack(fill="x", padx=14, pady=(0, 12))
-        ctk.CTkLabel(tags_row, text="Теги (через запятую):", font=("Segoe UI", 11),
-                     text_color=C["subtext"]).pack(side="left")
-        dict_tags_entry = ctk.CTkEntry(tags_row, font=("Segoe UI", 11),
-                                        text_color=C["text"], fg_color=C["card_alt"],
-                                        border_color=C["border"], height=26,
-                                        placeholder_text="dictation, notes")
-        dict_tags_entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
-        dict_tags_entry.insert(0, config.get("dictation_tags", "dictation"))
-
-        # --- Hotkeys ---
-        hf = ctk.CTkFrame(right, fg_color=C["card"], corner_radius=12,
-                           border_width=1, border_color=C["border"])
-        hf.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(hf, text="Hotkeys", font=("Segoe UI Semibold", 13),
-                     text_color=C["text"]).pack(padx=14, pady=(12, 8), anchor="w")
-
-        hotkey_entries = {}
-        for name, label in [("popup", "Show Popup (Ctrl+Alt+T)"),
-                            ("replace", "Replace Text (Ctrl+Alt+R)"),
-                            ("clipboard", "Translate Clipboard (Ctrl+Alt+Y)"),
-                            ("whisper", "Voice to Text (Ctrl+Alt+W)"),
-                            ("dictation", "Voice Dictation (Ctrl+Alt+D)"),
-                            ("voicechat", "Voice AI Chat (Ctrl+Alt+V)"),
-                            ("negotiator", "Negotiator (Ctrl+Alt+N)"),
-                            ("teacher", "English Teacher (Ctrl+Alt+E)")]:
-            ctk.CTkLabel(hf, text=label, font=("Segoe UI", 12),
-                         text_color=C["subtext"]).pack(padx=14, anchor="w")
-            entry = ctk.CTkEntry(hf, font=("Consolas", 11), text_color=C["text"],
-                                 fg_color=C["card"], border_color=C["border"],
-                                 placeholder_text="e.g., Ctrl+Alt+T")
-            entry.pack(padx=14, pady=(0, 8), fill="x")
-            entry.insert(0, config.get(f"hotkey_{name}", DEFAULT_HOTKEYS.get(name, "")))
-            hotkey_entries[name] = entry
-
-        # --- Save Button ---
-        def _on_save():
-            _save_settings(
-                win, key_entry, yandex_key_entry, yandex_folder_entry,
-                ollama_entry, neg_lang_var, autostart_var, clipboard_var, direct_var,
-                hotkey_entries, update_tray_icon, rebuild_menu,
-                lang_var, target_var, _name_to_code,
-                tts_engine_var, _tts_stored,
-                dict_folder_var, dict_fmt_var, _fmt_stored,
-                obsidian_var, dict_tags_entry,
-            )
-
-        save_btn = ctk.CTkButton(win, text="Save Settings", font=("Segoe UI Semibold", 14),
-                                 fg_color=C["accent"], text_color=C["bg"],
-                                 hover_color="#7ba4e8", corner_radius=10,
-                                 height=48, command=_on_save)
-        save_btn.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
-
-        _log.info("Settings window mainloop starting")
-        win.mainloop()
-      except Exception as e:
-        _log.error("Settings window crashed: %s\n%s", e, traceback.format_exc())
-
-    threading.Thread(target=_run, daemon=True).start()
-
-def _save_settings(win, key_entry, yandex_key_entry, yandex_folder_entry,
-                   ollama_entry, neg_lang_var, autostart_var, clipboard_var, direct_var,
-                   hotkey_entries, update_tray_icon, rebuild_menu,
-                   lang_var=None, target_var=None, name_to_code=None,
-                   tts_engine_var=None, tts_stored_map=None,
-                   dict_folder_var=None, dict_fmt_var=None, dict_fmt_stored=None,
-                   obsidian_var=None, dict_tags_entry=None):
-    """Save all settings."""
-    config["api_key"]          = key_entry.get().strip()
-    config["yandex_api_key"]   = yandex_key_entry.get().strip()
-    config["yandex_folder_id"] = yandex_folder_entry.get().strip()
-    ollama_val = ollama_entry.get().strip()
-    if ollama_val:
-        config["ollama_model"] = ollama_val
-    config["negotiator_lang"] = neg_lang_var.get()
-    config["autostart"]       = autostart_var.get()
-    config["clipboard_only"]  = clipboard_var.get()
-    config["direct_type"]     = direct_var.get()
-    if tts_engine_var and tts_stored_map:
-        config["tts_engine"] = tts_stored_map.get(tts_engine_var.get(), "gtts")
-
-    # Dictation settings
-    if dict_folder_var:
-        config["dictation_folder"] = dict_folder_var.get().strip()
-    if dict_fmt_var and dict_fmt_stored:
-        config["dictation_format"] = dict_fmt_stored.get(dict_fmt_var.get(), "md")
-    if obsidian_var is not None:
-        config["dictation_obsidian"] = obsidian_var.get()
-    if dict_tags_entry is not None:
-        config["dictation_tags"] = dict_tags_entry.get().strip()
-
-    # Source and target languages
-    if lang_var and name_to_code is not None:
-        src_name = lang_var.get()
-        config["source_lang"] = name_to_code.get(src_name, src_name)
-
-    if target_var and name_to_code is not None:
-        tgt_name = target_var.get()
-        if tgt_name == "(Same as source)":
-            config["target_lang"] = ""
-        else:
-            config["target_lang"] = name_to_code.get(tgt_name, tgt_name)
-
-    for name in hotkey_entries:
-        hk = hotkey_entries[name].get().strip()
-        if hk:
-            try:
-                parse_hotkey_string(hk)
-                config[f"hotkey_{name}"] = hk
             except Exception:
                 pass
+        self._update_tray()
+        self._rebuild_menu()
 
-    save_config_full()
+    def _test_tts(self):
+        from services.ai.tts import speak
+        self._tts_test_btn.setText("…")
+        self._tts_test_btn.setEnabled(False)
+        config["tts_engine"] = self._tts_stored.get(self._tts_combo.currentText(), "gtts")
+        speak("Проверка голоса", lang_code="ru")
+        QTimer.singleShot(3000, lambda: (
+            self._tts_test_btn.setText("▶ Test"),
+            self._tts_test_btn.setEnabled(True),
+        ))
 
-    # Destroy window first so tkinter mainloop ends cleanly
+    def _browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Папка для диктовок", self._dict_folder.text() or str(Path.home())
+        )
+        if folder:
+            self._dict_folder.setText(folder)
+
+    def _open_role_editor(self):
+        from ui.role_editor import show_role_editor
+        show_role_editor()
+
+    def _on_load_ai(self):
+        self._load_btn.setText("Loading…")
+        self._load_btn.setEnabled(False)
+        def _task():
+            from services.ai.ollama import preload_model
+            self._ai_load_sig.emit(preload_model())
+        threading.Thread(target=_task, daemon=True).start()
+
+    @Slot(bool)
+    def _on_ai_load_result(self, success: bool):
+        self._load_btn.setText("Loaded!" if success else "Error")
+        self._load_btn.setEnabled(True)
+        QTimer.singleShot(3000, lambda: self._load_btn.setText("Load into RAM"))
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+
+    def _save(self):
+        _n2c = self._name_to_code
+
+        config["api_key"]          = self._deepl_key.text().strip()
+        config["yandex_api_key"]   = self._yandex_key.text().strip()
+        config["yandex_folder_id"] = self._yandex_folder.text().strip()
+
+        ollama = self._ollama_entry.text().strip()
+        if ollama:
+            config["ollama_model"] = ollama
+
+        config["negotiator_lang"] = self._neg_lang_combo.currentText()
+        config["autostart"]       = self._autostart_cb.isChecked()
+        config["clipboard_only"]  = self._clipboard_cb.isChecked()
+        config["direct_type"]     = self._direct_cb.isChecked()
+        config["tts_engine"]      = self._tts_stored.get(self._tts_combo.currentText(), "gtts")
+
+        config["bridge_enabled"] = self._bridge_cb.isChecked()
+        try:
+            config["bridge_port"] = int(self._bridge_port.text().strip())
+        except ValueError:
+            pass
+
+        config["dictation_folder"]   = self._dict_folder.text().strip()
+        config["dictation_format"]   = self._fmt_stored.get(self._fmt_combo.currentText(), "md")
+        config["dictation_obsidian"] = self._obsidian_cb.isChecked()
+        config["dictation_tags"]     = self._tags_entry.text().strip()
+
+        src_name = self._src_combo.currentText()
+        config["source_lang"] = _n2c.get(src_name, src_name)
+
+        tgt_name = self._tgt_combo.currentText()
+        _SAME = "(Same as source)"
+        config["target_lang"] = "" if tgt_name == _SAME else _n2c.get(tgt_name, tgt_name)
+
+        for name, entry in self._hotkey_entries.items():
+            hk = entry.text().strip()
+            if hk:
+                try:
+                    parse_hotkey_string(hk)
+                    config[f"hotkey_{name}"] = hk
+                except Exception:
+                    pass
+
+        save_config_full()
+        self.close()
+
+        def _post():
+            from ui.tray_menu import set_autostart
+            set_autostart(config["autostart"])
+            self._update_tray()
+            self._rebuild_menu()
+        threading.Thread(target=_post, daemon=True).start()
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
+
+def show_settings_window(current_engine: str, update_tray_icon, rebuild_menu):
+    import logging
+    log = logging.getLogger("settings")
     try:
-        win.destroy()
-    except Exception:
-        pass
-
-    # Run autostart and tray updates in a background thread
-    # run in background to avoid blocking the UI thread
-    def _post_save():
-        from ui.tray_menu import set_autostart
-        set_autostart(config["autostart"])
-        update_tray_icon()
-        rebuild_menu()
-    threading.Thread(target=_post_save, daemon=True).start()
-
-def _open_role_editor():
-    from ui.role_editor import show_role_editor
-    show_role_editor()
+        win = SettingsWindow(current_engine, update_tray_icon, rebuild_menu)
+        win.show()
+    except Exception as e:
+        import traceback
+        log.error("Settings window failed: %s\n%s", e, traceback.format_exc())

@@ -12,9 +12,9 @@ def load_sessions():
             pass
     return {}
 
-def save_session(session_id, history, name=None):
+def save_session(session_id, history, name=None, source="desktop", mode=""):
     sessions = load_sessions()
-    
+
     # Auto-generate name from first user message if needed
     if name is None:
         if session_id in sessions and sessions[session_id].get("name") and sessions[session_id]["name"] != "New Chat":
@@ -29,7 +29,9 @@ def save_session(session_id, history, name=None):
     sessions[session_id] = {
         "name": name,
         "history": history,
-        "updated": datetime.datetime.now().isoformat()
+        "updated": datetime.datetime.now().isoformat(),
+        "source": source,
+        "mode": mode,
     }
     
     try:

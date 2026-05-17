@@ -1,291 +1,303 @@
-"""
-Popup review window for translations
-"""
+"""Translation popup window — PySide6, thread-safe via QObject controller."""
 
-import threading
-import customtkinter as ctk
+import logging
+from typing import Optional
+
+from PySide6.QtCore import QObject, QTimer, Qt, Signal, Slot
+from PySide6.QtGui import QFont, QIcon
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QPushButton,
+    QTextEdit, QVBoxLayout, QWidget,
+)
+
 from config import APP_NAME, ICON_FILE, C
 from utils.language import LANGUAGES, get_source_lang, get_target_lang
 
-# Global popup references
-_popup_win = None          # reusable popup window reference
-_popup_autoclose_id = None # after() id for auto-close timer
+log = logging.getLogger("popup_window")
 
-def _close_popup():
-    global _popup_win, _popup_autoclose_id
-    if _popup_win is not None:
-        try:
-            _popup_win.destroy()
-        except Exception:
-            pass
-    _popup_win = None
-    _popup_autoclose_id = None
+_BADGE_COLORS = {"deepl": C["accent"], "google": C["green"], "yandex": C["yellow"]}
 
-def show_translation_popup(original, translated, current_engine, target_lang=None):
-    global _popup_win, _popup_autoclose_id
 
-    # If a popup already exists try to reuse it
-    if _popup_win is not None:
-        try:
-            _popup_win.winfo_exists()  # raises if destroyed
-            _update_popup(_popup_win, original, translated, current_engine, target_lang)
-            _popup_win.deiconify()
-            _popup_win.lift()
-            _popup_win.focus_force()
-            _reset_autoclose(_popup_win)
-            return
-        except Exception:
-            _popup_win = None
+def _engine_display_name(engine: str) -> str:
+    return {"deepl": "DeepL", "google": "Google Translate", "yandex": "Yandex Translate"}.get(engine, engine)
 
-    # Create new popup on a background thread (tkinter main loop)
-    def _run():
-        global _popup_win, _popup_autoclose_id
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
-        win = ctk.CTk()
-        _popup_win = win
-        win.title(APP_NAME)
-        win.geometry("620x520")
-        win.resizable(True, True)
-        win.attributes("-topmost", True)
-        win.configure(fg_color=C["bg"])
+
+class _PopupWidget(QWidget):
+
+    def __init__(self, original: str, translated: str, engine: str, target_lang: Optional[str]):
+        super().__init__(None, Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._translated  = translated
+        self._engine      = engine
+        self._target_lang = target_lang
+        self._speaking    = False
+
+        self.setWindowTitle(APP_NAME)
+        self.resize(620, 520)
+        self.setMinimumSize(440, 380)
+        self.setStyleSheet(f"background: {C['bg']};")
 
         if ICON_FILE.exists():
-            try:
-                win.iconbitmap(str(ICON_FILE))
-            except Exception:
-                pass
+            self.setWindowIcon(QIcon(str(ICON_FILE)))
+
+        self._build_ui(original, translated, engine, target_lang)
+
+        self._autoclose = QTimer(self)
+        self._autoclose.setSingleShot(True)
+        self._autoclose.timeout.connect(self.close)
+        self._autoclose.start(10_000)
+
+    # ── Build ──
+
+    def _build_ui(self, original, translated, engine, target_lang):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         # Header
-        header = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=0, height=56)
-        header.pack(fill="x")
-        header.pack_propagate(False)
+        hdr = QFrame()
+        hdr.setFixedHeight(56)
+        hdr.setStyleSheet(f"background: {C['surface']}; border: none;")
+        hdr_lo = QHBoxLayout(hdr)
+        hdr_lo.setContentsMargins(16, 8, 16, 8)
 
-        engine_name = _engine_display_name(current_engine)
-        engine_colors = {"deepl": C["accent"], "google": C["green"], "yandex": C["yellow"]}
-        engine_color = engine_colors.get(current_engine, C["accent"])
+        title = QLabel(APP_NAME)
+        title.setFont(QFont("Segoe UI Semibold", 15))
+        title.setStyleSheet(f"color: {C['text']}; background: transparent;")
+        hdr_lo.addWidget(title)
+        hdr_lo.addStretch()
 
-        ctk.CTkLabel(header, text=APP_NAME, font=("Segoe UI Semibold", 16),
-                     text_color=C["text"]).pack(side="left", padx=16)
-
-        win._badge_frame = ctk.CTkFrame(header, fg_color=engine_color, corner_radius=8)
-        win._badge_frame.pack(side="right", padx=16, pady=12)
-        win._badge_label = ctk.CTkLabel(win._badge_frame, text=engine_name,
-                                         font=("Segoe UI Semibold", 11),
-                                         text_color=C["bg"], padx=10, pady=2)
-        win._badge_label.pack()
+        self._badge = QLabel()
+        self._badge.setFont(QFont("Segoe UI Semibold", 10))
+        hdr_lo.addWidget(self._badge)
+        root.addWidget(hdr)
 
         # Content
-        content = ctk.CTkFrame(win, fg_color=C["bg"], corner_radius=0)
-        content.pack(fill="both", expand=True, padx=20, pady=(16, 8))
+        body = QWidget()
+        body.setStyleSheet(f"background: {C['bg']};")
+        body_lo = QVBoxLayout(body)
+        body_lo.setContentsMargins(20, 16, 20, 8)
+        body_lo.setSpacing(6)
 
-        _src_label = LANGUAGES.get(get_source_lang(), get_source_lang()).upper()
-        _tgt_code  = target_lang or get_target_lang()
-        _tgt_label = LANGUAGES.get(_tgt_code, _tgt_code).upper()
-        win._orig_label = ctk.CTkLabel(content, text=f"ORIGINAL  ({_src_label})",
-                                        font=("Segoe UI Semibold", 11),
-                                        text_color=C["muted"], anchor="w")
-        win._orig_label.pack(fill="x", pady=(0, 6))
-        win._orig_box = ctk.CTkTextbox(content, height=120, font=("Segoe UI", 13),
-                                        fg_color=C["card"], text_color=C["text"],
-                                        border_width=1, border_color=C["border"],
-                                        corner_radius=10, wrap="word")
-        win._orig_box.pack(fill="both", expand=True, pady=(0, 12))
-        win._orig_box.insert("1.0", original)
-        win._orig_box.configure(state="disabled")
+        self._orig_label = QLabel()
+        self._orig_label.setFont(QFont("Segoe UI Semibold", 10))
+        self._orig_label.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        body_lo.addWidget(self._orig_label)
 
-        ctk.CTkLabel(content, text="   >", font=("Segoe UI", 16),
-                     text_color=C["accent"]).pack(pady=2)
+        self._orig_box = QTextEdit()
+        self._orig_box.setFont(QFont("Segoe UI", 12))
+        self._orig_box.setReadOnly(True)
+        self._orig_box.setStyleSheet(
+            f"QTextEdit {{ background: {C['card']}; color: {C['text']};"
+            f" border: 1px solid {C['border']}; border-radius: 8px; padding: 6px; }}"
+        )
+        body_lo.addWidget(self._orig_box, 1)
 
-        win._trans_label = ctk.CTkLabel(content, text=f"TRANSLATION  ({_tgt_label})",
-                                         font=("Segoe UI Semibold", 11),
-                                         text_color=C["muted"], anchor="w")
-        win._trans_label.pack(fill="x", pady=(4, 6))
-        win._trans_box = ctk.CTkTextbox(content, height=120, font=("Segoe UI", 13),
-                                         fg_color=C["card"], text_color=C["green"],
-                                         border_width=1, border_color=C["border"],
-                                         corner_radius=10, wrap="word")
-        win._trans_box.pack(fill="both", expand=True)
-        win._trans_box.insert("1.0", translated)
-        win._trans_box.configure(state="disabled")
+        arrow = QLabel("  >")
+        arrow.setFont(QFont("Segoe UI", 14))
+        arrow.setStyleSheet(f"color: {C['accent']}; background: transparent;")
+        body_lo.addWidget(arrow)
+
+        self._trans_label = QLabel()
+        self._trans_label.setFont(QFont("Segoe UI Semibold", 10))
+        self._trans_label.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        body_lo.addWidget(self._trans_label)
+
+        self._trans_box = QTextEdit()
+        self._trans_box.setFont(QFont("Segoe UI", 12))
+        self._trans_box.setReadOnly(True)
+        self._trans_box.setStyleSheet(
+            f"QTextEdit {{ background: {C['card']}; color: {C['green']};"
+            f" border: 1px solid {C['border']}; border-radius: 8px; padding: 6px; }}"
+        )
+        body_lo.addWidget(self._trans_box, 1)
+
+        root.addWidget(body, 1)
 
         # Footer
-        footer = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=0, height=72)
-        footer.pack(fill="x", side="bottom")
-        footer.pack_propagate(False)
+        footer = QFrame()
+        footer.setFixedHeight(72)
+        footer.setStyleSheet(f"background: {C['surface']}; border: none;")
+        foot_lo = QHBoxLayout(footer)
+        foot_lo.setContentsMargins(16, 12, 16, 12)
 
-        win._usage_label = ctk.CTkLabel(footer, text="", font=("Segoe UI", 11),
-                                         text_color=C["muted"])
-        win._usage_label.pack(side="left", padx=16, pady=12)
+        self._usage_lbl = QLabel()
+        self._usage_lbl.setFont(QFont("Segoe UI", 10))
+        self._usage_lbl.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        foot_lo.addWidget(self._usage_lbl)
+        foot_lo.addStretch()
 
-        _refresh_usage_label(win, current_engine)
+        _btn = "border-radius: 8px; padding: 4px 14px; font-family: 'Segoe UI'; font-size: 12px;"
 
-        bf = ctk.CTkFrame(footer, fg_color="transparent")
-        bf.pack(side="right", padx=16, pady=12)
+        self._speak_btn = QPushButton("  ▶  ")
+        self._speak_btn.setFixedHeight(36)
+        self._speak_btn.setStyleSheet(
+            f"QPushButton {{ {_btn} background: {C['surface']}; color: {C['accent']};"
+            f" border: 1px solid {C['border']}; }}"
+            f"QPushButton:hover {{ background: {C['card_alt']}; }}"
+        )
+        self._speak_btn.clicked.connect(self._do_speak)
+        foot_lo.addWidget(self._speak_btn)
 
-        def do_copy():
-            _reset_autoclose(win)
-            win.clipboard_clear()
-            win.clipboard_append(translated)
-            win._copy_btn.configure(text="  Copied!  ")
-            win.after(1500, lambda: win._copy_btn.configure(text="  Copy  "))
+        self._copy_btn = QPushButton("  Copy  ")
+        self._copy_btn.setFixedHeight(36)
+        self._copy_btn.setStyleSheet(
+            f"QPushButton {{ {_btn} background: {C['accent']}; color: {C['bg']}; border: none; }}"
+            f"QPushButton:hover {{ background: #7ba4e8; }}"
+        )
+        self._copy_btn.clicked.connect(self._do_copy)
+        foot_lo.addWidget(self._copy_btn)
 
-        def do_speak():
-            _reset_autoclose(win)
-            from services.ai.tts import is_available
-            if not is_available():
-                return
-            tgt = target_lang or get_target_lang()
-            _do_speak_updated(win, translated, tgt)
+        close_btn = QPushButton("  Close  ")
+        close_btn.setFixedHeight(36)
+        close_btn.setStyleSheet(
+            f"QPushButton {{ {_btn} background: {C['card_alt']}; color: {C['text']}; border: none; }}"
+            f"QPushButton:hover {{ background: {C['border']}; }}"
+        )
+        close_btn.clicked.connect(self.close)
+        foot_lo.addWidget(close_btn)
 
-        win._speaking = False
-        win._speak_btn = ctk.CTkButton(bf, text="  ▶  ", font=("Segoe UI", 13),
-                                        fg_color=C["surface"], text_color=C["accent"],
-                                        hover_color=C["card_alt"], corner_radius=10,
-                                        width=52, height=36, command=do_speak)
-        win._speak_btn.pack(side="left", padx=(0, 8))
+        root.addWidget(footer)
 
-        win._copy_btn = ctk.CTkButton(bf, text="  Copy  ", font=("Segoe UI Semibold", 13),
-                                       fg_color=C["accent"], text_color=C["bg"],
-                                       hover_color="#7ba4e8", corner_radius=10,
-                                       width=100, height=36, command=do_copy)
-        win._copy_btn.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(bf, text="  Close  ", font=("Segoe UI", 13),
-                       fg_color=C["card_alt"], text_color=C["text"],
-                       hover_color=C["border"], corner_radius=10,
-                       width=90, height=36, command=_close_popup).pack(side="left")
+        # Populate
+        self._apply_content(original, translated, engine, target_lang)
 
-        win.bind("<Escape>", lambda e: _close_popup())
+    def _apply_content(self, original, translated, engine, target_lang):
+        src_label = LANGUAGES.get(get_source_lang(), get_source_lang()).upper()
+        tgt_code  = target_lang or get_target_lang()
+        tgt_label = LANGUAGES.get(tgt_code, tgt_code).upper()
 
-        # Reset auto-close on any click/key inside the window
-        def _on_activity(event=None):
-            _reset_autoclose(win)
-        win.bind("<Button-1>", _on_activity)
-        win.bind("<Key>", _on_activity)
+        self._orig_label.setText(f"ORIGINAL  ({src_label})")
+        self._orig_box.setPlainText(original)
+        self._trans_label.setText(f"TRANSLATION  ({tgt_label})")
+        self._trans_box.setPlainText(translated)
 
-        # Nullify global ref on destroy
-        def _on_destroy(event=None):
-            global _popup_win, _popup_autoclose_id
-            if event.widget is win:
-                _popup_win = None
-                _popup_autoclose_id = None
-        win.bind("<Destroy>", _on_destroy)
+        color = _BADGE_COLORS.get(engine, C["accent"])
+        self._badge.setText(_engine_display_name(engine))
+        self._badge.setStyleSheet(
+            f"color: {C['bg']}; background: {color}; border-radius: 6px; padding: 2px 10px;"
+        )
+        self._refresh_usage(engine)
 
-        # Start the 10-second auto-close timer
-        _reset_autoclose(win)
+    def _refresh_usage(self, engine: str):
+        from globals import usage_data
+        if engine == "deepl" and usage_data["character_limit"] > 0:
+            rem = usage_data["character_limit"] - usage_data["character_count"]
+            pct = rem / usage_data["character_limit"] * 100
+            txt = f"{rem:,} / {usage_data['character_limit']:,} chars left  ({pct:.1f}%)"
+        elif engine == "deepl":
+            txt = "DeepL usage data unavailable"
+        else:
+            txt = f"{_engine_display_name(engine)} - free, no limit"
+        self._usage_lbl.setText(txt)
 
-        win.mainloop()
-    threading.Thread(target=_run, daemon=True).start()
+    # ── User interactions ──
 
-def _update_popup(win, original, translated, current_engine, target_lang=None):
-    """Refresh the content of an existing popup window."""
-    # Update original text
-    win._orig_box.configure(state="normal")
-    win._orig_box.delete("1.0", "end")
-    win._orig_box.insert("1.0", original)
-    win._orig_box.configure(state="disabled")
-    # Update translation text
-    win._trans_box.configure(state="normal")
-    win._trans_box.delete("1.0", "end")
-    win._trans_box.insert("1.0", translated)
-    win._trans_box.configure(state="disabled")
-    # Update source language label
-    _src_label = LANGUAGES.get(get_source_lang(), get_source_lang()).upper()
-    win._orig_label.configure(text=f"ORIGINAL  ({_src_label})")
-    # Update translation language label
-    _tgt_code  = target_lang or get_target_lang()
-    _tgt_label = LANGUAGES.get(_tgt_code, _tgt_code).upper()
-    try:
-        win._trans_label.configure(text=f"TRANSLATION  ({_tgt_label})")
-    except Exception:
-        pass
-    # Update engine badge
-    engine_name = _engine_display_name(current_engine)
-    engine_colors = {"deepl": C["accent"], "google": C["green"], "yandex": C["yellow"]}
-    win._badge_frame.configure(fg_color=engine_colors.get(current_engine, C["accent"]))
-    win._badge_label.configure(text=engine_name)
-    # Update usage
-    _refresh_usage_label(win, current_engine)
-    # Reset copy button
-    win._copy_btn.configure(text="  Copy  ",
-                             command=lambda: _do_copy_updated(win, translated))
-    # Reset speak button
-    from services.ai.tts import stop
-    stop()
-    win._speaking = False
-    try:
-        tgt = target_lang or get_target_lang()
-        win._speak_btn.configure(text="  ▶  ",
-                                  command=lambda t=translated, l=tgt: _do_speak_updated(win, t, l))
-    except Exception:
-        pass
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.close()
+        else:
+            self._reset_autoclose()
 
-def _do_speak_updated(win, translated, lang_code):
-    from services.ai.tts import speak, stop
-    if getattr(win, "_speaking", False):
+    def mousePressEvent(self, _e):
+        self._reset_autoclose()
+
+    def _reset_autoclose(self):
+        self._autoclose.start(10_000)
+
+    def _do_copy(self):
+        self._reset_autoclose()
+        from win32.clipboard import set_clipboard_text
+        set_clipboard_text(self._translated)
+        self._copy_btn.setText("  Copied!  ")
+        QTimer.singleShot(1500, lambda: self._copy_btn.setText("  Copy  "))
+
+    def _do_speak(self):
+        self._reset_autoclose()
+        from services.ai.tts import is_available, speak, stop
+        if not is_available():
+            return
+        if self._speaking:
+            stop()
+            self._speaking = False
+            self._speak_btn.setText("  ▶  ")
+        else:
+            self._speaking = True
+            self._speak_btn.setText("  ■  ")
+            lang = self._target_lang or get_target_lang()
+            speak(self._translated, lang_code=lang)
+            self._poll_tts()
+
+    def _poll_tts(self):
+        from services.ai.tts import _speak_lock
+        if not _speak_lock.locked():
+            self._speaking = False
+            try:
+                self._speak_btn.setText("  ▶  ")
+            except RuntimeError:
+                pass
+        else:
+            QTimer.singleShot(200, self._poll_tts)
+
+    # ── Update in place ──
+
+    def update_content(self, original: str, translated: str, engine: str, target_lang: Optional[str]):
+        from services.ai.tts import stop
         stop()
-        win._speaking = False
-        try:
-            win._speak_btn.configure(text="  ▶  ")
-        except Exception:
-            pass
+        self._translated  = translated
+        self._engine      = engine
+        self._target_lang = target_lang
+        self._speaking    = False
+        self._speak_btn.setText("  ▶  ")
+        self._copy_btn.setText("  Copy  ")
+        self._apply_content(original, translated, engine, target_lang)
+        self._reset_autoclose()
+
+
+class PopupController(QObject):
+    """Thread-safe controller. Lives on the Qt main thread."""
+    _show_sig = Signal(str, str, str, str)   # original, translated, engine, target_lang
+
+    def __init__(self):
+        super().__init__()
+        self._widget: Optional[_PopupWidget] = None
+        self._show_sig.connect(self._do_show)
+
+    def show_popup(self, original: str, translated: str, engine: str, target_lang: str):
+        self._show_sig.emit(original, translated, engine, target_lang or "")
+
+    @Slot(str, str, str, str)
+    def _do_show(self, original: str, translated: str, engine: str, target_lang: str):
+        tl = target_lang or None
+        if self._widget is not None:
+            try:
+                self._widget.update_content(original, translated, engine, tl)
+                self._widget.show()
+                self._widget.activateWindow()
+                self._widget.raise_()
+                return
+            except RuntimeError:
+                self._widget = None
+
+        self._widget = _PopupWidget(original, translated, engine, tl)
+        self._widget.destroyed.connect(lambda: setattr(self, "_widget", None))
+        self._widget.show()
+        self._widget.activateWindow()
+
+
+_controller: Optional[PopupController] = None
+
+
+def setup_popup() -> PopupController:
+    """Create the singleton. Must be called from the Qt main thread in main.py."""
+    global _controller
+    if _controller is None:
+        _controller = PopupController()
+    return _controller
+
+
+def show_translation_popup(original: str, translated: str, current_engine: str, target_lang=None):
+    if _controller is not None:
+        _controller.show_popup(original, translated, current_engine, target_lang or "")
     else:
-        win._speaking = True
-        try:
-            win._speak_btn.configure(text="  ■  ")
-        except Exception:
-            pass
-        speak(translated, lang_code=lang_code)
-        def _poll():
-            from services.ai.tts import _speak_lock
-            if not _speak_lock.locked():
-                try:
-                    win._speaking = False
-                    win._speak_btn.configure(text="  ▶  ")
-                except Exception:
-                    pass
-            else:
-                try:
-                    win.after(200, _poll)
-                except Exception:
-                    pass
-        try:
-            win.after(200, _poll)
-        except Exception:
-            pass
-
-def _do_copy_updated(win, translated):
-    _reset_autoclose(win)
-    try:
-        win.clipboard_clear()
-        win.clipboard_append(translated)
-        win._copy_btn.configure(text="  Copied!  ")
-        win.after(1500, lambda: win._copy_btn.configure(text="  Copy  "))
-    except Exception:
-        pass
-
-def _refresh_usage_label(win, current_engine):
-    from globals import usage_data
-    engine_name = _engine_display_name(current_engine)
-    if current_engine == "deepl" and usage_data["character_limit"] > 0:
-        rem = usage_data["character_limit"] - usage_data["character_count"]
-        pct = rem / usage_data["character_limit"] * 100
-        txt = f"{rem:,} / {usage_data['character_limit']:,} chars left  ({pct:.1f}%)"
-    elif current_engine == "deepl":
-        txt = "DeepL usage data unavailable"
-    else:
-        txt = f"{engine_name} - free, no limit"
-    win._usage_label.configure(text=txt)
-
-def _reset_autoclose(win):
-    """(Re)start the 10-second inactivity auto-close timer."""
-    global _popup_autoclose_id
-    try:
-        if _popup_autoclose_id is not None:
-            win.after_cancel(_popup_autoclose_id)
-        _popup_autoclose_id = win.after(10000, _close_popup)
-    except Exception:
-        pass
-
-def _engine_display_name(engine):
-    return {"deepl": "DeepL", "google": "Google Translate", "yandex": "Yandex Translate"}.get(engine, engine)
+        log.warning("show_translation_popup called before setup_popup")

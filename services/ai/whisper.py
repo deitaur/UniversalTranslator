@@ -140,112 +140,175 @@ def _close_pipe_window():
 # ── Prereq dialog ──────────────────────────────────────────────────────────────
 
 def _show_prereq_dialog(checks: dict, on_proceed):
-    import customtkinter as ctk
+    """Show a PySide6 prereq-check dialog. Safe to call from any thread."""
     import subprocess
+    from PySide6.QtCore import QObject, Qt, Signal, Slot
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import (
+        QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
+    )
 
-    C = {"bg": "#1e1e2e", "surface": "#313244", "card": "#181825",
-         "text": "#cdd6f4", "muted": "#6c7086", "accent": "#89b4fa",
-         "green": "#a6e3a1", "yellow": "#f9e2af", "red": "#f38ba8"}
+    _C = {"bg": "#1e1e2e", "surface": "#313244", "card": "#181825",
+          "text": "#cdd6f4", "muted": "#6c7086", "accent": "#89b4fa",
+          "green": "#a6e3a1", "yellow": "#f9e2af", "red": "#f38ba8"}
 
-    def _run():
-        ctk.set_appearance_mode("dark")
-        win = ctk.CTk()
-        win.title("Whisper — проверка зависимостей")
-        win.resizable(False, False)
-        win.attributes("-topmost", True)
-        win.configure(fg_color=C["bg"])
-        cx, cy = _cursor_pos()
-        win.geometry(f"+{max(cx - 200, 20)}+{max(cy - 160, 20)}")
+    class _Launcher(QObject):
+        _sig = Signal()
+        def __init__(self):
+            super().__init__()
+            self._sig.connect(self._run)
+        def launch(self):
+            self._sig.emit()
+        @Slot()
+        def _run(self):
+            pkg_missing = []
+            for key, c in checks.items():
+                if key == "packages" and c["ok"] is False:
+                    for part in c["detail"].split("\n"):
+                        if "pip install" in part:
+                            pkg_missing.extend(part.strip().replace("pip install ", "").split())
 
-        hdr = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=0, height=44)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
-        ctk.CTkLabel(hdr, text="🎙  Whisper — проверка перед запуском",
-                     font=("Segoe UI Semibold", 13), text_color=C["text"]
-                     ).pack(side="left", padx=14, pady=10)
+            dlg = QDialog()
+            dlg.setWindowTitle("Whisper — проверка зависимостей")
+            dlg.setWindowFlags(
+                dlg.windowFlags() |
+                Qt.WindowType.WindowStaysOnTopHint
+            )
+            dlg.setFixedWidth(560)
+            dlg.setStyleSheet(f"background: {_C['bg']}; color: {_C['text']};")
 
-        body = ctk.CTkFrame(win, fg_color=C["card"], corner_radius=0)
-        body.pack(fill="both")
+            root = QVBoxLayout(dlg)
+            root.setContentsMargins(0, 0, 0, 0)
+            root.setSpacing(0)
 
-        pkg_missing = []
-        keys = list(checks.keys())
-        for i, (key, c) in enumerate(checks.items()):
-            ok, optional = c["ok"], c.get("optional", False)
-            if ok is True:
-                icon, color = "✓", C["green"]
-            elif ok is False and optional:
-                icon, color = "⚠", C["yellow"]
-            elif ok is False:
-                icon, color = "✗", C["red"]
-            else:
-                icon, color = "·", C["muted"]
+            # Header
+            hdr = QFrame()
+            hdr.setFixedHeight(44)
+            hdr.setStyleSheet(f"background: {_C['surface']}; border: none;")
+            hdr_lo = QHBoxLayout(hdr)
+            hdr_lo.setContentsMargins(14, 0, 14, 0)
+            lbl = QLabel("🎙  Whisper — проверка перед запуском")
+            lbl.setFont(QFont("Segoe UI Semibold", 12))
+            lbl.setStyleSheet(f"color: {_C['text']}; background: transparent;")
+            hdr_lo.addWidget(lbl)
+            root.addWidget(hdr)
 
-            row = ctk.CTkFrame(body, fg_color="transparent")
-            row.pack(fill="x", padx=14, pady=(8 if i == 0 else 2, 2))
-            ctk.CTkLabel(row, text=icon, font=("Segoe UI Bold", 15),
-                         text_color=color, width=20).pack(side="left")
-            ctk.CTkLabel(row, text=c["label"], font=("Segoe UI Semibold", 12),
-                         text_color=C["text"], width=150, anchor="w"
-                         ).pack(side="left", padx=(6, 0))
-            ctk.CTkLabel(row, text=c["detail"], font=("Segoe UI", 11),
-                         text_color=C["muted"] if ok else color,
-                         anchor="w", wraplength=280, justify="left"
-                         ).pack(side="left", padx=(8, 0))
+            # Body — check rows
+            body = QFrame()
+            body.setStyleSheet(f"background: {_C['card']}; border: none;")
+            body_lo = QVBoxLayout(body)
+            body_lo.setContentsMargins(14, 8, 14, 8)
+            body_lo.setSpacing(4)
 
-            if key == "packages" and ok is False:
-                for part in c["detail"].split("\n"):
-                    if "pip install" in part:
-                        pkg_missing.extend(part.strip().replace("pip install ", "").split())
+            for key, c in checks.items():
+                ok, optional = c["ok"], c.get("optional", False)
+                if ok is True:
+                    icon, color = "✓", _C["green"]
+                elif ok is False and optional:
+                    icon, color = "⚠", _C["yellow"]
+                elif ok is False:
+                    icon, color = "✗", _C["red"]
+                else:
+                    icon, color = "·", _C["muted"]
 
-        ctk.CTkFrame(win, fg_color=C["surface"], height=1).pack(fill="x", pady=(10, 0))
+                row = QHBoxLayout()
+                row.setSpacing(6)
 
-        footer = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=0, height=52)
-        footer.pack(fill="x")
-        footer.pack_propagate(False)
+                ico = QLabel(icon)
+                ico.setFont(QFont("Segoe UI Bold", 13))
+                ico.setStyleSheet(f"color: {color}; background: transparent;")
+                ico.setFixedWidth(18)
+                row.addWidget(ico)
 
-        bf = ctk.CTkFrame(footer, fg_color="transparent")
-        bf.pack(side="right", padx=12, pady=10)
+                name = QLabel(c["label"])
+                name.setFont(QFont("Segoe UI Semibold", 11))
+                name.setStyleSheet(f"color: {_C['text']}; background: transparent;")
+                name.setFixedWidth(160)
+                row.addWidget(name)
 
-        ctk.CTkButton(bf, text="Отмена", width=80, height=32,
-                      font=("Segoe UI", 12), fg_color=C["surface"],
-                      text_color=C["muted"], hover_color=C["card"],
-                      command=win.destroy).pack(side="left", padx=(0, 6))
+                detail_color = _C["muted"] if ok else color
+                detail = QLabel(c["detail"])
+                detail.setFont(QFont("Segoe UI", 10))
+                detail.setStyleSheet(f"color: {detail_color}; background: transparent;")
+                detail.setWordWrap(True)
+                row.addWidget(detail, 1)
 
-        if pkg_missing:
-            def _install():
-                try:
-                    subprocess.Popen(
-                        ["cmd", "/k", "pip", "install"] + pkg_missing,
-                        creationflags=subprocess.CREATE_NEW_CONSOLE,
-                    )
-                except Exception as e:
-                    from ui.notifications import show_toast
-                    show_toast(f"Ошибка: {e}")
+                body_lo.addLayout(row)
 
-            ctk.CTkButton(bf, text="Установить пакеты", width=150, height=32,
-                          font=("Segoe UI Semibold", 12), fg_color=C["surface"],
-                          text_color=C["yellow"], hover_color=C["card"],
-                          command=_install).pack(side="left", padx=(0, 6))
+            root.addWidget(body)
 
-        ready = _all_required_ok(checks)
+            # Separator
+            sep = QFrame()
+            sep.setFixedHeight(1)
+            sep.setStyleSheet(f"background: {_C['surface']};")
+            root.addWidget(sep)
 
-        def _proceed():
-            win.destroy()
-            on_proceed()
+            # Footer
+            footer = QFrame()
+            footer.setFixedHeight(52)
+            footer.setStyleSheet(f"background: {_C['surface']}; border: none;")
+            foot_lo = QHBoxLayout(footer)
+            foot_lo.setContentsMargins(12, 10, 12, 10)
+            foot_lo.addStretch()
 
-        ctk.CTkButton(bf,
-                      text="Начать запись" if ready else "Начать всё равно",
-                      width=140, height=32,
-                      font=("Segoe UI Semibold", 12),
-                      fg_color=C["accent"] if ready else C["yellow"],
-                      text_color=C["bg"],
-                      hover_color="#7ba4e8" if ready else "#e8d59f",
-                      command=_proceed).pack(side="left")
+            _btn = "border-radius: 6px; padding: 3px 12px; font-family: 'Segoe UI'; font-size: 11px;"
 
-        win.bind("<Escape>", lambda e: win.destroy())
-        win.mainloop()
+            cancel = QPushButton("Отмена")
+            cancel.setFixedHeight(32)
+            cancel.setStyleSheet(
+                f"QPushButton {{ {_btn} background: {_C['surface']}; color: {_C['muted']}; border: 1px solid {_C['card']}; }}"
+                f"QPushButton:hover {{ background: {_C['card']}; }}"
+            )
+            cancel.clicked.connect(dlg.reject)
+            foot_lo.addWidget(cancel)
 
-    threading.Thread(target=_run, daemon=True).start()
+            if pkg_missing:
+                def _install():
+                    try:
+                        subprocess.Popen(
+                            ["cmd", "/k", "pip", "install"] + pkg_missing,
+                            creationflags=subprocess.CREATE_NEW_CONSOLE,
+                        )
+                    except Exception as e:
+                        from ui.notifications import show_toast
+                        show_toast(f"Ошибка: {e}")
+
+                install_btn = QPushButton("Установить пакеты")
+                install_btn.setFixedHeight(32)
+                install_btn.setStyleSheet(
+                    f"QPushButton {{ {_btn} background: {_C['surface']}; color: {_C['yellow']}; border: 1px solid {_C['card']}; }}"
+                    f"QPushButton:hover {{ background: {_C['card']}; }}"
+                )
+                install_btn.clicked.connect(_install)
+                foot_lo.addWidget(install_btn)
+
+            ready = _all_required_ok(checks)
+            proceed_text = "Начать запись" if ready else "Начать всё равно"
+            proceed_color = _C["accent"] if ready else _C["yellow"]
+            proceed_hover = "#7ba4e8" if ready else "#e8d59f"
+
+            def _do_proceed():
+                dlg.accept()
+                on_proceed()
+
+            proceed_btn = QPushButton(proceed_text)
+            proceed_btn.setFixedHeight(32)
+            proceed_btn.setStyleSheet(
+                f"QPushButton {{ {_btn} background: {proceed_color}; color: {_C['bg']}; border: none; }}"
+                f"QPushButton:hover {{ background: {proceed_hover}; }}"
+            )
+            proceed_btn.clicked.connect(_do_proceed)
+            foot_lo.addWidget(proceed_btn)
+
+            root.addWidget(footer)
+
+            cx, cy = _cursor_pos()
+            dlg.adjustSize()
+            dlg.move(max(cx - 200, 20), max(cy - 160, 20))
+            dlg.exec()
+
+    launcher = _Launcher()
+    launcher.launch()
 
 
 # ── Model loading ──────────────────────────────────────────────────────────────

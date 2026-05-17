@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "AI Companion",
+    "slug": "ai-companion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1e1e2e"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aicompanion.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "AI Companion needs microphone access to hear you during walking sessions.",
+        "NSCameraUsageDescription": "Used to scan the QR code from your PC settings.",
+        "UIBackgroundModes": ["audio"]
+      }
+    },
+    "android": {
+      "package": "com.aicompanion.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-av",
+        { "microphonePermission": "Allow AI Companion to use your microphone." }
+      ]
+    ],
+    "updates": {
+      "enabled": false
+    },
+    "scheme": "aicompanion",
+    "extra": {
+      "router": { "origin": false }
+    }
+  }
+}
