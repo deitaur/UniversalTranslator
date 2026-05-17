@@ -45,3 +45,25 @@ archive/
 
 # Antigravity AI assistant
 .antigravity*
+
+# Node / React Native / Expo
+node_modules/
+mobile/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.expo/
+mobile/.expo/
+*.orig.*
+web-build/
+dist/
+.env
+.env.local
+
+# App log (runtime, not source)
+app.log
+
+# Windows shortcuts / temp
+*.lnk
+_make_*.vbs
+launch.vbs
