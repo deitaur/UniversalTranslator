@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QRectF, QTimer, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
@@ -35,15 +35,38 @@ def _screen_w() -> int:
     return ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN
 
 
-# ── Base widget ───────────────────────────────────────────────────────────────
+# ── ZBrush-style status bar widget ───────────────────────────────────────────
+#
+# Thin horizontal bar that follows the cursor at all pipeline stages.
+# Colors: dark gray bg, lighter gray text — matches ZBrush's status line.
 
-class _Rounded(QWidget):
-    """Frameless, translucent, always-on-top widget. Rounded rect is painted."""
-    _BG     = QColor("#313244")
-    _BORDER = QColor("#45475a")
+_ZB_BG      = "#3a3a3a"   # ZBrush dark gray
+_ZB_TEXT    = "#c8c8c8"   # light gray — noticeably lighter than bg
+_ZB_DIM     = "#888888"   # timer / secondary info
+_ZB_REC     = "#e06060"   # recording dot (warm red)
+_ZB_OK      = "#80cc80"   # success green
+_ZB_ERR     = "#e06060"   # error red
+_ZB_ACCENT  = "#88aadd"   # processing blue
+_ZB_FONT    = "Segoe UI"
+_ZB_SIZE    = 9           # pt — small, like ZBrush
 
-    def __init__(self):
+
+class _PipeWidget(QWidget):
+    """
+    ZBrush-style status bar that follows the cursor.
+    Single line during recording/processing; adds a preview line on result/saved.
+    Follows cursor at ALL stages — stops only after final result is shown.
+    """
+    _MIN_W = 220
+    _MAX_W = 480
+
+    def __init__(self, cx: int, cy: int, stop_cb: Callable):
         super().__init__()
+        self._stop_cb  = stop_cb
+        self._t0       = time.time()
+        self._blink_on = True
+        self._follow   = True   # keep tracking cursor until done
+
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
@@ -52,186 +75,164 @@ class _Rounded(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect().adjusted(1, 1, -1, -1)), 10, 10)
-        p.fillPath(path, self._BG)
-        p.setPen(QPen(self._BORDER, 1.0))
-        p.drawPath(path)
-
-
-# ── Recording/transcription HUD widget ───────────────────────────────────────
-
-class _PipeWidget(_Rounded):
-    """
-    Follows the cursor while recording (blink + timer).
-    Stops following and shows result/error/saved once recording ends.
-    """
-    W = 310
-
-    def __init__(self, cx: int, cy: int, stop_cb: Callable):
-        super().__init__()
-        self._stop_cb   = stop_cb
-        self._recording = True
-        self._blink_on  = True
-        self._t0        = time.time()
-
         self._build_ui()
         self._reposition(cx, cy)
         self.show()
 
-        self._t_blink = QTimer(self)
-        self._t_blink.setInterval(500)
-        self._t_blink.timeout.connect(self._blink)
-
-        self._t_cursor = QTimer(self)
-        self._t_cursor.setInterval(80)
-        self._t_cursor.timeout.connect(self._track_cursor)
-
-        self._t_clock = QTimer(self)
-        self._t_clock.setInterval(1000)
-        self._t_clock.timeout.connect(self._tick)
-
+        self._t_blink  = QTimer(self); self._t_blink.setInterval(500);  self._t_blink.timeout.connect(self._blink)
+        self._t_cursor = QTimer(self); self._t_cursor.setInterval(60);  self._t_cursor.timeout.connect(self._track)
+        self._t_clock  = QTimer(self); self._t_clock.setInterval(1000); self._t_clock.timeout.connect(self._tick)
         self._t_blink.start()
         self._t_cursor.start()
         self._t_clock.start()
 
     def _build_ui(self):
-        self.setFixedWidth(self.W)
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 8, 10, 8)
-        root.setSpacing(0)
+        root.setContentsMargins(8, 3, 8, 3)
+        root.setSpacing(1)
 
-        # Row 1: icon | status | timer
-        r1 = QHBoxLayout()
-        r1.setSpacing(0)
+        # ── Main status row ──
+        row = QHBoxLayout()
+        row.setSpacing(5)
+        row.setContentsMargins(0, 0, 0, 0)
 
-        self._icon = QLabel("●")
-        self._icon.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self._icon.setFixedWidth(18)
-        self._icon.setStyleSheet("color: #f38ba8;")
-        r1.addWidget(self._icon)
+        self._dot = QLabel("●")
+        self._dot.setFont(QFont(_ZB_FONT, 7, QFont.Weight.Bold))
+        self._dot.setFixedWidth(10)
+        self._dot.setStyleSheet(f"color: {_ZB_REC};")
+        row.addWidget(self._dot)
 
-        self._status = QLabel("Запись…  (клик — стоп)")
-        self._status.setFont(QFont("Segoe UI", 10))
-        self._status.setStyleSheet("color: #cdd6f4; padding-left: 7px;")
-        r1.addWidget(self._status, 1)
+        self._status = QLabel("rec  (click to stop)")
+        f = QFont(_ZB_FONT, _ZB_SIZE)
+        self._status.setFont(f)
+        self._status.setStyleSheet(f"color: {_ZB_TEXT};")
+        row.addWidget(self._status, 1)
 
         self._timer = QLabel("0s")
-        self._timer.setFont(QFont("Segoe UI", 9))
-        self._timer.setStyleSheet("color: #6c7086;")
-        r1.addWidget(self._timer)
+        self._timer.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
+        self._timer.setStyleSheet(f"color: {_ZB_DIM};")
+        row.addWidget(self._timer)
 
-        root.addLayout(r1)
+        root.addLayout(row)
 
-        # Row 2: result preview (hidden initially)
-        self._result = QLabel()
-        self._result.setFont(QFont("Segoe UI", 9))
-        self._result.setStyleSheet("color: #a6e3a1; padding-top: 4px;")
-        self._result.setWordWrap(True)
-        self._result.hide()
-        root.addWidget(self._result)
+        # ── Preview line (result / saved) ──
+        self._preview = QLabel()
+        self._preview.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
+        self._preview.setStyleSheet(f"color: {_ZB_DIM};")
+        self._preview.setWordWrap(True)
+        self._preview.hide()
+        root.addWidget(self._preview)
 
-        # Row 3: open-file / open-folder buttons (hidden initially; shown for dictation saves)
+        # ── Dictation buttons (open file / folder) ──
         self._btn_row = QWidget()
         bl = QHBoxLayout(self._btn_row)
-        bl.setContentsMargins(0, 4, 0, 0)
-        bl.setSpacing(6)
-        _btn_style = (
-            "QPushButton { background:#45475a; color:#89b4fa; border:none;"
-            " border-radius:5px; padding:3px 10px; }"
-            "QPushButton:hover { background:#585b70; }"
-        )
-        self._btn_file   = QPushButton("Открыть файл")
-        self._btn_folder = QPushButton("Открыть папку")
+        bl.setContentsMargins(0, 2, 0, 0)
+        bl.setSpacing(4)
+        _bs = (f"QPushButton {{ background:#505050; color:{_ZB_TEXT}; border:none;"
+               f" padding:2px 8px; font-size:8pt; }}"
+               f"QPushButton:hover {{ background:#686868; }}")
+        self._btn_file   = QPushButton("open file")
+        self._btn_folder = QPushButton("open folder")
         for b in (self._btn_file, self._btn_folder):
-            b.setFont(QFont("Segoe UI", 9))
-            b.setStyleSheet(_btn_style)
+            b.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
+            b.setStyleSheet(_bs)
         bl.addWidget(self._btn_file)
         bl.addWidget(self._btn_folder)
         self._btn_row.hide()
         root.addWidget(self._btn_row)
 
+        self._refresh_width()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 2, 2)
+        p.fillPath(path, QColor(_ZB_BG))
+
+    # ── Layout helpers ──
+
+    def _refresh_width(self):
+        self.adjustSize()
+        w = max(self._MIN_W, min(self.sizeHint().width() + 4, self._MAX_W))
+        self.setFixedWidth(w)
         self.adjustSize()
 
-    # ── Positioning ──
+    # ── Cursor tracking ──
 
     def _reposition(self, cx: int, cy: int):
         sw = _screen_w()
-        x  = min(cx + 18, sw - self.W - 20)
-        y  = max(cy - 72 - 10, 40)
+        w  = self.width() or self._MIN_W
+        x  = min(cx + 16, sw - w - 12)
+        y  = cy + 18        # just below cursor arrow
         self.move(x, y)
 
-    # ── Timer callbacks ──
+    def _track(self):
+        if self._follow:
+            self._reposition(*_win32_cursor())
+
+    # ── Blink / timer ──
 
     def _blink(self):
-        if not self._recording:
-            self._t_blink.stop()
-            return
         self._blink_on = not self._blink_on
-        self._icon.setStyleSheet(f"color: {'#f38ba8' if self._blink_on else '#45475a'};")
-
-    def _track_cursor(self):
-        if not self._recording:
-            self._t_cursor.stop()
-            return
-        self._reposition(*_win32_cursor())
+        if self._blink_on:
+            self._dot.setStyleSheet(f"color: {_ZB_REC};")
+        else:
+            self._dot.setStyleSheet(f"color: #606060;")
 
     def _tick(self):
-        if not self._recording:
-            self._t_clock.stop()
-            return
         self._timer.setText(f"{int(time.time() - self._t0)}s")
 
-    def _stop_timers(self):
-        self._recording = False
+    # ── State setters ──
+
+    def set_status(self, text: str, _icon: str = "◌", color: str = _ZB_ACCENT):
+        """Processing stage — keep following cursor, swap dot color."""
         self._t_blink.stop()
-        self._t_cursor.stop()
-        self._t_clock.stop()
-
-    # ── State setters (called from Qt main thread via PipeHud slots) ──
-
-    def set_status(self, text: str, icon: str = "◌", color: str = "#89b4fa"):
-        self._stop_timers()
-        self._icon.setText(icon)
-        self._icon.setStyleSheet(f"color: {color};")
+        self._dot.setStyleSheet(f"color: {color};")
+        self._dot.setText("▸")
         self._status.setText(text)
-        self._status.setStyleSheet("color: #cdd6f4; padding-left: 7px;")
         self._timer.setText("")
+        self._t_clock.stop()
+        self._refresh_width()
 
     def show_result(self, text: str):
-        self._stop_timers()
-        self._icon.setText("✓")
-        self._icon.setStyleSheet("color: #a6e3a1;")
-        self._status.setText("Скопировано в буфер")
-        self._status.setStyleSheet("color: #a6e3a1; padding-left: 7px;")
+        self._follow = False
+        self._t_blink.stop()
+        self._t_clock.stop()
+        self._dot.setText("✓")
+        self._dot.setStyleSheet(f"color: {_ZB_OK};")
+        self._status.setStyleSheet(f"color: {_ZB_OK};")
+        self._status.setText("done")
         self._timer.setText("")
-        preview = text[:130].rstrip() + ("…" if len(text) > 130 else "")
-        self._result.setText(preview)
-        self._result.show()
-        self.adjustSize()
+        if text:
+            self._preview.setStyleSheet(f"color: {_ZB_DIM};")
+            self._preview.setText(text[:100] + ("…" if len(text) > 100 else ""))
+            self._preview.show()
+        self._refresh_width()
 
     def show_error(self, text: str):
-        self._stop_timers()
-        self._icon.setText("✗")
-        self._icon.setStyleSheet("color: #f38ba8;")
-        self._status.setText(text[:80])
-        self._status.setStyleSheet("color: #f38ba8; padding-left: 7px;")
+        self._follow = False
+        self._t_blink.stop()
+        self._t_clock.stop()
+        self._dot.setText("✕")
+        self._dot.setStyleSheet(f"color: {_ZB_ERR};")
+        self._status.setStyleSheet(f"color: {_ZB_ERR};")
+        self._status.setText(text[:90])
         self._timer.setText("")
+        self._refresh_width()
 
     def show_saved(self, filepath: str, filename: str, preview: str):
-        """Used by dictation: show save confirmation with open buttons."""
-        self._stop_timers()
-        self._icon.setText("✓")
-        self._icon.setStyleSheet("color: #a6e3a1;")
-        self._status.setText(f"Сохранено: {filename}")
-        self._status.setStyleSheet("color: #a6e3a1; padding-left: 7px;")
+        self._follow = False
+        self._t_blink.stop()
+        self._t_clock.stop()
+        self._dot.setText("✓")
+        self._dot.setStyleSheet(f"color: {_ZB_OK};")
+        self._status.setStyleSheet(f"color: {_ZB_OK};")
+        self._status.setText(f"saved  {filename}")
         self._timer.setText("")
-        self._result.setText(preview[:120].rstrip() + ("…" if len(preview) > 120 else ""))
-        self._result.show()
-        # wire buttons (disconnect first to avoid double-triggers if reused)
+        self._preview.setStyleSheet(f"color: {_ZB_DIM};")
+        self._preview.setText(preview[:90] + ("…" if len(preview) > 90 else ""))
+        self._preview.show()
         for btn in (self._btn_file, self._btn_folder):
             try:
                 btn.clicked.disconnect()
@@ -241,9 +242,9 @@ class _PipeWidget(_Rounded):
         self._btn_file.clicked.connect(lambda: _os_open(str(fp)))
         self._btn_folder.clicked.connect(lambda: _os_open(str(fp.parent)))
         self._btn_row.show()
-        self.adjustSize()
+        self._refresh_width()
 
-    # ── Mouse / keyboard ──
+    # ── Input ──
 
     def mousePressEvent(self, _e):
         self._stop_cb()
@@ -262,7 +263,7 @@ def _os_open(path: str):
 
 # ── Voice-chat panel widget ───────────────────────────────────────────────────
 
-class _VoiceChatWidget(_Rounded):
+class _VoiceChatWidget(QWidget):
     """Fixed panel in the top-right corner. Click = interrupt TTS."""
     W, H = 320, 78
 
@@ -272,12 +273,29 @@ class _VoiceChatWidget(_Rounded):
 
     def __init__(self, stop_cb: Callable, interrupt_cb: Callable):
         super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._stop_cb      = stop_cb
         self._interrupt_cb = interrupt_cb
         self._build_ui()
         self.setFixedSize(self.W, self.H)
         self.move(_screen_w() - self.W - 24, 60)
         self.show()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect().adjusted(1, 1, -1, -1)), 10, 10)
+        p.fillPath(path, QColor("#313244"))
+        from PySide6.QtGui import QPen
+        p.setPen(QPen(QColor("#45475a"), 1.0))
+        p.drawPath(path)
 
     def _build_ui(self):
         root = QVBoxLayout(self)
