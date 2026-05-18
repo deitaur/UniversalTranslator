@@ -512,9 +512,16 @@ class VoiceChatDialog(QWidget):
                 chunks.append(chunk)
                 self._token_sig.emit("".join(chunks))
 
+            def on_status(text: str):
+                if text:
+                    self._status_sig.emit(text, C["accent"])
+                else:
+                    self._status_sig.emit("", C["muted"])
+
             try:
                 full = chat_ollama(
-                    self._history, on_token=on_tok, mode=self._current_role_id()
+                    self._history, on_token=on_tok, on_status=on_status,
+                    mode=self._current_role_id()
                 )
                 self._history.append({"role": "assistant", "content": full})
                 if len(self._history) > 30:

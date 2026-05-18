@@ -133,6 +133,7 @@ class ChatWindow(QWidget):
     _done_sig     = Signal(str)   # full response finished
     _error_sig    = Signal(str)   # error text
     _enable_sig   = Signal()      # re-enable input
+    _status_sig   = Signal(str)   # tool status (e.g. "🔍 Searching…")
 
     def __init__(self, initial_text: str = "", mode: str = "negotiator"):
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint)
@@ -154,6 +155,7 @@ class ChatWindow(QWidget):
         self._done_sig.connect(self._on_done)
         self._error_sig.connect(self._on_error)
         self._enable_sig.connect(self._re_enable)
+        self._status_sig.connect(self._on_status)
 
         self._load_session()
         self._build()
@@ -326,6 +328,15 @@ class ChatWindow(QWidget):
 
         self._scroll.setWidget(self._chat_container)
         root.addWidget(self._scroll, 1)
+
+        # ── Status bar (tool activity)
+        self._status_lbl = QLabel("")
+        self._status_lbl.setFont(QFont("Segoe UI", 9))
+        self._status_lbl.setFixedHeight(18)
+        self._status_lbl.setStyleSheet(
+            f"color:{C['accent']}; background:{C['bg']}; padding-left:10px;")
+        self._status_lbl.setVisible(False)
+        root.addWidget(self._status_lbl)
 
         # ── Input bar
         input_bar = QFrame()
@@ -523,8 +534,11 @@ class ChatWindow(QWidget):
             def on_token(chunk):
                 chunks.append(chunk)
                 self._token_sig.emit("".join(chunks))
+            def on_status(text: str):
+                self._status_sig.emit(text)
             try:
-                full = chat_ollama(self._history, on_token=on_token, mode=self._mode)
+                full = chat_ollama(self._history, on_token=on_token,
+                                   on_status=on_status, mode=self._mode)
                 self._history.append({"role": "assistant", "content": full})
                 self._save_session()
                 self._done_sig.emit(full)
@@ -556,8 +570,17 @@ class ChatWindow(QWidget):
         self._streaming_bubble = None
         self._re_enable()
 
+    @Slot(str)
+    def _on_status(self, text: str):
+        if text:
+            self._status_lbl.setText(text)
+            self._status_lbl.setVisible(True)
+        else:
+            self._status_lbl.setVisible(False)
+
     @Slot()
     def _re_enable(self):
+        self._status_lbl.setVisible(False)
         self._entry.setEnabled(True)
         self._send_btn.setEnabled(True)
         self._entry.setFocus()
