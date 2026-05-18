@@ -20,6 +20,7 @@ HOTKEY_NEGOTIATOR = 5
 HOTKEY_TEACHER = 6
 HOTKEY_DICTATION  = 7
 HOTKEY_VOICECHAT  = 8
+HOTKEY_POLISH     = 9
 
 WM_HOTKEY = 0x0312
 
@@ -46,6 +47,7 @@ DEFAULT_HOTKEYS = {
     "teacher":    "Ctrl+Alt+E",
     "dictation":  "Ctrl+Alt+D",
     "voicechat":  "Ctrl+Alt+V",
+    "polish":     "Ctrl+Alt+F",
 }
 
 user32 = ctypes.windll.user32
