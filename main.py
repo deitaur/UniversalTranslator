@@ -129,6 +129,8 @@ def _grab_selected_text():
 
 def on_hotkey_replace():
     log.debug("on_hotkey_replace called")
+
+    # Grab selection BEFORE opening HUD — window creation can steal focus
     text = _grab_selected_text()
     if not text.strip():
         log.debug("No text selected, skipping")
@@ -136,15 +138,31 @@ def on_hotkey_replace():
         return
 
     log.debug("Text (%d chars): %s...", len(text), text[:50])
+
+    from ui.hud import get_pipe_hud
+    hud = get_pipe_hud()
+    if hud:
+        hud.open_at_cursor()
+        hud.set_status("translating…")
+
     translated, _ = translate_auto(text)
     if not translated:
         log.warning("Translation returned empty")
+        if hud:
+            hud.show_error("translation failed")
         return
+
+    if hud:
+        hud.set_status("pasting…")
 
     set_clipboard_text(translated)
     log.debug("Translation set to clipboard (%d chars)", len(translated))
     send_ctrl_v()
-    show_toast("✓", 800)
+
+    if hud:
+        hud.show_result(translated[:80])
+    else:
+        show_toast("✓", 800)
 
 def on_hotkey_popup():
     log.debug("on_hotkey_popup called")
@@ -201,14 +219,26 @@ def on_hotkey_polish_handler():
 
 def _register_hotkeys():
     from win32.hotkeys import hotkey_mods_vk
-    for name, hid in [("popup", HOTKEY_POPUP), ("replace", HOTKEY_REPLACE),
-                      ("clipboard", HOTKEY_CLIPBOARD), ("whisper", HOTKEY_WHISPER),
-                      ("dictation", HOTKEY_DICTATION), ("voicechat", HOTKEY_VOICECHAT),
-                      ("negotiator", HOTKEY_NEGOTIATOR), ("teacher", HOTKEY_TEACHER),
-                      ("polish", HOTKEY_POLISH)]:
+    _pairs = [("popup", HOTKEY_POPUP), ("replace", HOTKEY_REPLACE),
+              ("clipboard", HOTKEY_CLIPBOARD), ("whisper", HOTKEY_WHISPER),
+              ("dictation", HOTKEY_DICTATION), ("voicechat", HOTKEY_VOICECHAT),
+              ("negotiator", HOTKEY_NEGOTIATOR), ("teacher", HOTKEY_TEACHER),
+              ("polish", HOTKEY_POLISH)]
+    # Unregister first — clears stale registrations from a previous crashed instance
+    for _, hid in _pairs:
+        unregister_hotkey(hid)
+    failed = []
+    for name, hid in _pairs:
         mods, vk = hotkey_mods_vk(name)
         result = register_hotkey(hid, mods, vk)
         log.info("RegisterHotKey(%s, id=%d, mods=0x%x, vk=0x%x) => %s", name, hid, mods, vk, result)
+        if not result:
+            import ctypes
+            err = ctypes.get_last_error()
+            log.warning("  !! FAILED: %s  WinError=%d", name, err)
+            failed.append(name)
+    if failed:
+        show_toast(f"Hotkey registration failed: {', '.join(failed)}\nCheck app.log", 5000)
 
 def _unregister_hotkeys():
     for hid in [HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_CLIPBOARD,
@@ -312,6 +342,7 @@ def main():
         api_key = load_config()
         g.current_engine = config.get("engine", "deepl")
         log.info("Engine: %s, API key present: %s", g.current_engine, bool(api_key))
+
 
         if g.current_engine == "deepl" and not api_key:
             switch_to_google_silently()

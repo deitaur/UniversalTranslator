@@ -45,6 +45,38 @@ _POLISH_PROMPT = (
     "Transcription:\n"
 )
 
+_FORMAT_PROMPT = """\
+You are a senior editor and technical writer. You receive a raw voice-to-text recording — unstructured, with filler words, repetitions, and stream-of-consciousness speech.
+
+YOUR MISSION: transform it into a clean, professional document that a busy reader can scan in seconds.
+
+STEP 1 — CLEAN:
+• Remove all filler words: "ну", "вот", "э-э", "как бы", "в общем", "собственно", "типа", "um", "uh", "like", "you know", "basically", "so", "right"
+• Remove repetitions and false starts
+• Fix grammar and spelling silently
+
+STEP 2 — EXTRACT & GROUP:
+• Identify every distinct idea, task, or topic
+• Group closely related points together
+• Discard nothing — every real idea must appear in the output
+
+STEP 3 — STRUCTURE (choose the format that fits the content):
+  • 1–2 simple thoughts → clean paragraph, no headers
+  • List of items / ideas → bullet list with "• " prefix
+  • Sequence of steps → numbered list  1.  2.  3.
+  • Action items / tasks → checklist with "☐ " prefix
+  • Multiple distinct topics → TOPIC HEADING: on its own line, then content below
+  • Mixed content → combine the above as needed
+  Separate blocks with a blank line.
+  Do NOT use markdown symbols (#, *, **, ~~) — plain text only.
+
+STEP 4 — OUTPUT:
+Output ONLY the final structured text. No preamble, no explanations, no "Here is your text:", no quotes around the result.
+Keep the ORIGINAL language of the input — do NOT translate.
+
+RAW INPUT:
+"""
+
 
 def _is_hallucination(text: str) -> bool:
     """Return True if whisper just made something up (silence artifact)."""
@@ -137,39 +169,73 @@ def _start_polish():
             _pipe_show_error("Речь не распознана — говорите чётче или выберите другой микрофон")
             return
 
-        # ── Stage 3: polish via Ollama ────────────────────────────────────────
-        preview_in = raw_text[:35] + ("…" if len(raw_text) > 35 else "")
-        _pipe_set_status(f"ИИ: «{preview_in}»", "✨", "#cba6f7")
-        try:
-            from services.ai.ollama import check_ollama, get_ollama_model
-            import requests
+        # ── Stage 3: AI edit via Ollama (streaming so we see progress) ──────────
+        from config import config
+        from services.ai.ollama import check_ollama, get_polish_model
+        import requests, json as _json
 
-            if not check_ollama():
-                polished = raw_text
-                log.warning("Ollama unavailable — using raw transcription")
-            else:
-                import json
-                body = {
-                    "model": get_ollama_model(),
-                    "messages": [
-                        {"role": "user", "content": _POLISH_PROMPT + raw_text}
-                    ],
-                    "stream": False,
-                    "options": {"num_predict": 1024},
-                }
-                r = requests.post(
+        use_format = config.get("format_output", True)
+        prompt     = _FORMAT_PROMPT if use_format else _POLISH_PROMPT
+        model_name = get_polish_model()
+        preview_in = raw_text[:30] + ("…" if len(raw_text) > 30 else "")
+        _pipe_set_status(f"[{model_name.split(':')[0]}] редактирую…  «{preview_in}»", "✨", "#cba6f7")
+        log.debug("Polish model: %s", model_name)
+        polished = raw_text
+
+        if not check_ollama():
+            log.warning("Ollama unavailable — pasting raw text")
+            _pipe_set_status("Ollama недоступна — вставляю как есть", "⚠", "#f9e2af")
+            time.sleep(1.2)
+        else:
+            body = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt + raw_text}],
+                "stream": True,
+                "options": {"num_predict": 1024},
+            }
+            chunks = []
+            elapsed_s = [0]
+            try:
+                with requests.post(
                     "http://localhost:11434/api/chat",
-                    json=body, timeout=60,
-                )
-                r.raise_for_status()
-                r.encoding = "utf-8"
-                polished = r.json().get("message", {}).get("content", "").strip()
-                if not polished:
-                    polished = raw_text
-
-        except Exception as e:
-            log.warning("Polish LLM error: %s — using raw text", e)
-            polished = raw_text
+                    json=body, timeout=240, stream=True,
+                ) as r:
+                    r.raise_for_status()
+                    t0 = time.time()
+                    for line in r.iter_lines(decode_unicode=True):
+                        if not line:
+                            continue
+                        try:
+                            data = _json.loads(line)
+                        except Exception:
+                            continue
+                        token = data.get("message", {}).get("content", "")
+                        if token:
+                            chunks.append(token)
+                        elapsed_s[0] = int(time.time() - t0)
+                        # update HUD every ~20 tokens
+                        if len(chunks) % 20 == 0:
+                            partial = "".join(chunks)[-30:]
+                            _pipe_set_status(
+                                f"[{model_name.split(':')[0]}] {elapsed_s[0]}s  …{partial}",
+                                "✨", "#cba6f7",
+                            )
+                        if data.get("done"):
+                            break
+                result = "".join(chunks).strip()
+                if result:
+                    polished = result
+                    log.debug("Polish done in %ds, %d chars", elapsed_s[0], len(polished))
+                else:
+                    log.warning("Polish returned empty — using raw text")
+            except requests.exceptions.Timeout:
+                log.warning("Polish timeout after 240s — using raw text")
+                _pipe_set_status("Модель не ответила — вставляю как есть", "⚠", "#f9e2af")
+                time.sleep(1.5)
+            except Exception as e:
+                log.warning("Ollama edit error: %s — using raw text", e)
+                _pipe_set_status(f"Ошибка ИИ: {str(e)[:40]}", "⚠", "#f38ba8")
+                time.sleep(2.0)
 
         log.debug("Polished: %r", polished[:100])
 

@@ -369,9 +369,41 @@ class SettingsWindow(QWidget):
         # ── AI / Ollama ────────────────────────────────────────────────────
         s = _Section("AI / Ollama")
         lo.addWidget(s)
-        s.add(_lbl("Model:"))
-        self._ollama_entry = _input(config.get("ollama_model", "qwen2.5:14b"), "e.g. qwen2.5:14b", mono=True)
-        s.add(self._ollama_entry)
+        from services.ai.ollama import get_ollama_model, get_polish_model, _running_models
+        _running = _running_models()
+        _running_str = ", ".join(_running) if _running else "none loaded"
+        s.add(_lbl(f"Currently in RAM:  {_running_str}", C["muted"]))
+        s.add_spacing(4)
+
+        s.add(_lbl("Chat / Voice Chat model:"))
+        self._ollama_chat_entry = _input(
+            config.get("ollama_model_chat", ""),
+            placeholder=f"auto  [{get_ollama_model()}]",
+            mono=True,
+        )
+        self._ollama_chat_entry.setToolTip(
+            "Model for chat, voice chat and web search.\n"
+            "Leave blank to auto-use whatever is loaded in Ollama RAM.\n"
+            "Recommended: qwen2.5:14b  (fast, good tool calling)"
+        )
+        s.add(self._ollama_chat_entry)
+        s.add_spacing(2)
+
+        s.add(_lbl("Polish / Format model:"))
+        self._ollama_polish_entry = _input(
+            config.get("ollama_model_polish", ""),
+            placeholder=f"auto  [{get_polish_model()}]",
+            mono=True,
+        )
+        self._ollama_polish_entry.setToolTip(
+            "Model for voice-polish (Ctrl+Alt+F) text editing.\n"
+            "Leave blank to auto-use whatever is loaded in Ollama RAM.\n"
+            "Recommended: gemma4:26b  (best writing quality)"
+        )
+        s.add(self._ollama_polish_entry)
+
+        # legacy single-model field kept for bridge/diagnose compat
+        self._ollama_entry = self._ollama_chat_entry
         s.add(_lbl("Response language:"))
         self._neg_lang_combo = _combo(["Same as input", "English", "Russian"],
                                       config.get("negotiator_lang", "Same as input"))
@@ -452,6 +484,17 @@ class SettingsWindow(QWidget):
         self._tags_entry = _input(config.get("dictation_tags", "dictation"), "dictation, notes")
         tags_row.addWidget(self._tags_entry, 1)
         s.add_layout(tags_row)
+
+        # ── Voice Polish ──────────────────────────────────────────────────
+        s = _Section("Voice Polish  (Ctrl+Alt+F)")
+        lo.addWidget(s)
+        self._format_cb = QCheckBox("AI format output  (structure text like a professional editor)")
+        self._format_cb.setFont(_F_LABEL)
+        self._format_cb.setChecked(config.get("format_output", True))
+        self._format_cb.setStyleSheet(_SS_CHECK)
+        s.add(self._format_cb)
+        s.add(_lbl("When enabled: after transcription, AI adds headings, bullet points,\n"
+                   "numbered lists and clean paragraphs before pasting.", C["muted"]))
 
         # ── Hotkeys ────────────────────────────────────────────────────────
         s = _Section("Hotkeys")
@@ -637,9 +680,12 @@ class SettingsWindow(QWidget):
         config["yandex_api_key"]   = self._yandex_key.text().strip()
         config["yandex_folder_id"] = self._yandex_folder.text().strip()
 
-        ollama = self._ollama_entry.text().strip()
-        if ollama:
-            config["ollama_model"] = ollama
+        config["ollama_model_chat"]   = self._ollama_chat_entry.text().strip()
+        config["ollama_model_polish"] = self._ollama_polish_entry.text().strip()
+        # invalidate the running-models cache so next call re-detects
+        from services.ai import ollama as _ol
+        _ol._ps_cache = []
+        _ol._ps_cache_ts = 0.0
 
         config["negotiator_lang"] = self._neg_lang_combo.currentText()
         config["autostart"]       = self._autostart_cb.isChecked()
@@ -657,6 +703,7 @@ class SettingsWindow(QWidget):
         config["dictation_format"]   = self._fmt_stored.get(self._fmt_combo.currentText(), "md")
         config["dictation_obsidian"] = self._obsidian_cb.isChecked()
         config["dictation_tags"]     = self._tags_entry.text().strip()
+        config["format_output"]      = self._format_cb.isChecked()
 
         src_name = self._src_combo.currentText()
         config["source_lang"] = _n2c.get(src_name, src_name)

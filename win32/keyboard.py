@@ -84,29 +84,31 @@ def has_caret():
         return bool(gti.hwndCaret)
     return False
 
+def _send_combo(vk_modifier: int, vk_key: int):
+    """Press modifier+key via SendInput, then release both."""
+    inputs = (INPUT_STRUCT * 4)(
+        _mk(vk_modifier, 0),
+        _mk(vk_key,      0),
+        _mk(vk_key,      KEYEVENTF_KEYUP),
+        _mk(vk_modifier, KEYEVENTF_KEYUP),
+    )
+    user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT_STRUCT))
+
+
 def send_ctrl_c():
-    """Send Ctrl+C using keybd_event (more reliable than SendInput for hotkeys)."""
+    """Copy selection to clipboard via SendInput (works in Electron/browser/UWP)."""
     _wait_for_modifiers_release()
-    user32.keybd_event(0x11, 0, 0, 0)           # Ctrl down
-    time.sleep(0.01)
-    user32.keybd_event(0x43, 0, 0, 0)           # C down
-    time.sleep(0.01)
-    user32.keybd_event(0x43, 0, KEYEVENTF_KEYUP, 0)  # C up
-    time.sleep(0.01)
-    user32.keybd_event(0x11, 0, KEYEVENTF_KEYUP, 0)  # Ctrl up
-    time.sleep(0.2)
+    time.sleep(0.05)   # brief settle after modifiers released
+    _send_combo(0x11, 0x43)   # Ctrl+C
+    time.sleep(0.25)          # wait for clipboard to be written
+
 
 def send_ctrl_v():
-    """Send Ctrl+V using keybd_event."""
+    """Paste from clipboard via SendInput."""
     _wait_for_modifiers_release()
-    user32.keybd_event(0x11, 0, 0, 0)           # Ctrl down
-    time.sleep(0.01)
-    user32.keybd_event(0x56, 0, 0, 0)           # V down
-    time.sleep(0.01)
-    user32.keybd_event(0x56, 0, KEYEVENTF_KEYUP, 0)  # V up
-    time.sleep(0.01)
-    user32.keybd_event(0x11, 0, KEYEVENTF_KEYUP, 0)  # Ctrl up
-    time.sleep(0.2)
+    time.sleep(0.05)
+    _send_combo(0x11, 0x56)   # Ctrl+V
+    time.sleep(0.15)
 
 def type_unicode_text(text):
     """Type text directly via Unicode SendInput events (no clipboard needed)."""

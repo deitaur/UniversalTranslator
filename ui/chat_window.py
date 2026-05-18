@@ -216,7 +216,8 @@ class ChatWindow(QWidget):
         self._role_combo.currentIndexChanged.connect(self._on_role_change)
         hdr_lo.addWidget(self._role_combo)
 
-        model_lbl = QLabel(config.get("ollama_model", "qwen2.5:14b"))
+        from services.ai.ollama import get_ollama_model as _gom
+        model_lbl = QLabel(_gom())
         model_lbl.setFont(QFont("Segoe UI", 9))
         model_lbl.setStyleSheet(f"color:{C['muted']}; background:transparent;")
         hdr_lo.addWidget(model_lbl)

@@ -74,8 +74,74 @@ def _get_system_prompt(mode="negotiator"):
         return "You are a helpful assistant." + lang_suffix
 
 
-def get_ollama_model():
-    return config.get("ollama_model", "qwen2.5:14b")
+_FALLBACK_CHAT   = "qwen2.5:14b"
+_FALLBACK_POLISH = "gemma4:26b"
+
+_ps_cache:    list  = []
+_ps_cache_ts: float = 0.0
+_PS_TTL = 30   # seconds between /api/ps re-checks
+
+
+def _running_models() -> list[str]:
+    """Return names of models currently loaded in Ollama RAM (cached 30s)."""
+    import time
+    global _ps_cache, _ps_cache_ts
+    now = time.time()
+    if _ps_cache and now - _ps_cache_ts < _PS_TTL:
+        return _ps_cache
+    try:
+        r = requests.get("http://localhost:11434/api/ps", timeout=2)
+        if r.status_code == 200:
+            _ps_cache    = [m["name"] for m in r.json().get("models", [])]
+            _ps_cache_ts = now
+            return _ps_cache
+    except Exception:
+        pass
+    return _ps_cache  # stale cache beats empty
+
+
+def get_ollama_model() -> str:
+    """Model for chat / voice-chat / tool-calling.
+    Priority: config override → first running model → fallback."""
+    override = config.get("ollama_model_chat", "").strip()
+    if override:
+        return override
+    running = _running_models()
+    return running[0] if running else (config.get("ollama_model") or _FALLBACK_CHAT)
+
+
+def get_polish_model() -> str:
+    """Model for voice-polish / text formatting.
+    Priority: config override → first running model → fallback."""
+    override = config.get("ollama_model_polish", "").strip()
+    if override:
+        return override
+    running = _running_models()
+    return running[0] if running else _FALLBACK_POLISH
+
+
+def unload_other_models():
+    """Unload every model except the currently active one from Ollama RAM."""
+    active   = get_ollama_model()
+    unloaded = []
+    try:
+        r = requests.get("http://localhost:11434/api/ps", timeout=5)
+        r.raise_for_status()
+        for m in r.json().get("models", []):
+            name = m.get("name", "")
+            if name and name != active:
+                try:
+                    requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={"model": name, "keep_alive": 0},
+                        timeout=10,
+                    )
+                    unloaded.append(name)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return unloaded
 
 
 def check_ollama():

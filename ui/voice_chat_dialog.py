@@ -142,7 +142,8 @@ class VoiceChatDialog(QWidget):
             self._role_combo.addItem(role.get("name", rid), rid)
         hdr_lo.addWidget(self._role_combo)
 
-        self._model_lbl = QLabel(config.get("ollama_model", "qwen2.5:14b"))
+        from services.ai.ollama import get_ollama_model as _gom
+        self._model_lbl = QLabel(_gom())
         self._model_lbl.setFont(QFont("Segoe UI", 8))
         self._model_lbl.setStyleSheet(f"color:{C['muted']}; background:transparent;")
         hdr_lo.addWidget(self._model_lbl)

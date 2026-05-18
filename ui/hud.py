@@ -51,61 +51,92 @@ _ZB_FONT    = "Segoe UI"
 _ZB_SIZE    = 9           # pt — small, like ZBrush
 
 
+def _work_area() -> tuple[int, int, int, int]:
+    """Return (left, top, right, bottom) of the desktop work area (screen minus taskbar)."""
+    class _RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+    rc = _RECT()
+    ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rc), 0)  # SPI_GETWORKAREA
+    return rc.left, rc.top, rc.right, rc.bottom
+
+
 class _PipeWidget(QWidget):
     """
-    ZBrush-style status bar that follows the cursor.
-    Single line during recording/processing; adds a preview line on result/saved.
-    Follows cursor at ALL stages — stops only after final result is shown.
+    Fixed-position status notification panel in the bottom-right corner.
+    Always on top via HWND_TOPMOST; never steals focus.
     """
-    _MIN_W = 220
-    _MAX_W = 480
+    W = 300   # fixed width
 
-    def __init__(self, cx: int, cy: int, stop_cb: Callable):
+    def __init__(self, stop_cb: Callable):
         super().__init__()
-        self._stop_cb  = stop_cb
-        self._t0       = time.time()
-        self._blink_on = True
-        self._follow   = True   # keep tracking cursor until done
+        self._stop_cb     = stop_cb
+        self._t0          = time.time()
+        self._blink_on    = True
+        self._blink_color = _ZB_REC
+        self._blink_dim   = "#606060"
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
         self._build_ui()
-        self._reposition(cx, cy)
+        self.setFixedWidth(self.W)
+        self.adjustSize()
+        self._reposition()
         self.show()
+        self._force_topmost()
 
-        self._t_blink  = QTimer(self); self._t_blink.setInterval(500);  self._t_blink.timeout.connect(self._blink)
-        self._t_cursor = QTimer(self); self._t_cursor.setInterval(60);  self._t_cursor.timeout.connect(self._track)
-        self._t_clock  = QTimer(self); self._t_clock.setInterval(1000); self._t_clock.timeout.connect(self._tick)
+        self._t_blink = QTimer(self); self._t_blink.setInterval(500); self._t_blink.timeout.connect(self._blink)
+        self._t_clock = QTimer(self); self._t_clock.setInterval(1000); self._t_clock.timeout.connect(self._tick)
         self._t_blink.start()
-        self._t_cursor.start()
         self._t_clock.start()
+
+    # ── Positioning ──
+
+    def _reposition(self):
+        _, _, wa_r, wa_b = _work_area()
+        self.adjustSize()
+        self.move(wa_r - self.W - 12, wa_b - self.height() - 12)
+
+    def _force_topmost(self):
+        HWND_TOPMOST   = -1
+        SWP_NOMOVE     = 0x0002
+        SWP_NOSIZE     = 0x0001
+        SWP_NOACTIVATE = 0x0010
+        ctypes.windll.user32.SetWindowPos(
+            int(self.winId()), HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+
+    # ── UI ──
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 3, 8, 3)
-        root.setSpacing(1)
+        root.setContentsMargins(10, 7, 10, 7)
+        root.setSpacing(3)
 
-        # ── Main status row ──
+        # ── Status row ──
         row = QHBoxLayout()
-        row.setSpacing(5)
+        row.setSpacing(6)
         row.setContentsMargins(0, 0, 0, 0)
 
         self._dot = QLabel("●")
-        self._dot.setFont(QFont(_ZB_FONT, 7, QFont.Weight.Bold))
-        self._dot.setFixedWidth(10)
+        self._dot.setFont(QFont(_ZB_FONT, 8, QFont.Weight.Bold))
+        self._dot.setFixedWidth(12)
         self._dot.setStyleSheet(f"color: {_ZB_REC};")
         row.addWidget(self._dot)
 
-        self._status = QLabel("rec  (click to stop)")
-        f = QFont(_ZB_FONT, _ZB_SIZE)
-        self._status.setFont(f)
+        self._status = QLabel("rec")
+        self._status.setFont(QFont(_ZB_FONT, _ZB_SIZE))
         self._status.setStyleSheet(f"color: {_ZB_TEXT};")
+        self._status.setWordWrap(False)
         row.addWidget(self._status, 1)
 
         self._timer = QLabel("0s")
@@ -113,17 +144,25 @@ class _PipeWidget(QWidget):
         self._timer.setStyleSheet(f"color: {_ZB_DIM};")
         row.addWidget(self._timer)
 
+        close_lbl = QLabel("✕")
+        close_lbl.setFont(QFont(_ZB_FONT, 8))
+        close_lbl.setStyleSheet(f"color: {_ZB_DIM};")
+        close_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_lbl.mousePressEvent = lambda _: self._stop_cb()
+        row.addWidget(close_lbl)
+
         root.addLayout(row)
 
-        # ── Preview line (result / saved) ──
+        # ── Preview (result text / saved path) ──
         self._preview = QLabel()
         self._preview.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
         self._preview.setStyleSheet(f"color: {_ZB_DIM};")
         self._preview.setWordWrap(True)
+        self._preview.setMaximumWidth(self.W - 20)
         self._preview.hide()
         root.addWidget(self._preview)
 
-        # ── Dictation buttons (open file / folder) ──
+        # ── Dictation file buttons ──
         self._btn_row = QWidget()
         bl = QHBoxLayout(self._btn_row)
         bl.setContentsMargins(0, 2, 0, 0)
@@ -141,88 +180,66 @@ class _PipeWidget(QWidget):
         self._btn_row.hide()
         root.addWidget(self._btn_row)
 
-        self._refresh_width()
-
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 2, 2)
+        path.addRoundedRect(QRectF(self.rect()), 8, 8)
         p.fillPath(path, QColor(_ZB_BG))
+        from PySide6.QtGui import QPen
+        p.setPen(QPen(QColor("#505060"), 1))
+        p.drawPath(path)
 
-    # ── Layout helpers ──
-
-    def _refresh_width(self):
-        self.adjustSize()
-        w = max(self._MIN_W, min(self.sizeHint().width() + 4, self._MAX_W))
-        self.setFixedWidth(w)
-        self.adjustSize()
-
-    # ── Cursor tracking ──
-
-    def _reposition(self, cx: int, cy: int):
-        sw = _screen_w()
-        w  = self.width() or self._MIN_W
-        x  = min(cx + 16, sw - w - 12)
-        y  = cy + 18        # just below cursor arrow
-        self.move(x, y)
-
-    def _track(self):
-        if self._follow:
-            self._reposition(*_win32_cursor())
-
-    # ── Blink / timer ──
+    # ── Timers ──
 
     def _blink(self):
         self._blink_on = not self._blink_on
-        if self._blink_on:
-            self._dot.setStyleSheet(f"color: {_ZB_REC};")
-        else:
-            self._dot.setStyleSheet(f"color: #606060;")
+        color = self._blink_color if self._blink_on else self._blink_dim
+        self._dot.setStyleSheet(f"color: {color};")
 
     def _tick(self):
         self._timer.setText(f"{int(time.time() - self._t0)}s")
 
+    def _relayout(self):
+        self.adjustSize()
+        self._reposition()
+        self._force_topmost()
+
     # ── State setters ──
 
     def set_status(self, text: str, _icon: str = "◌", color: str = _ZB_ACCENT):
-        """Processing stage — keep following cursor, swap dot color."""
-        self._t_blink.stop()
-        self._dot.setStyleSheet(f"color: {color};")
+        self._blink_color = color
+        self._blink_dim   = _ZB_DIM
         self._dot.setText("▸")
         self._status.setText(text)
         self._timer.setText("")
         self._t_clock.stop()
-        self._refresh_width()
+        self._relayout()
 
     def show_result(self, text: str):
-        self._follow = False
         self._t_blink.stop()
         self._t_clock.stop()
         self._dot.setText("✓")
         self._dot.setStyleSheet(f"color: {_ZB_OK};")
         self._status.setStyleSheet(f"color: {_ZB_OK};")
-        self._status.setText("done")
+        self._status.setText("готово")
         self._timer.setText("")
         if text:
-            self._preview.setStyleSheet(f"color: {_ZB_DIM};")
-            self._preview.setText(text[:100] + ("…" if len(text) > 100 else ""))
+            self._preview.setText(text[:120] + ("…" if len(text) > 120 else ""))
             self._preview.show()
-        self._refresh_width()
+        self._relayout()
 
     def show_error(self, text: str):
-        self._follow = False
         self._t_blink.stop()
         self._t_clock.stop()
         self._dot.setText("✕")
         self._dot.setStyleSheet(f"color: {_ZB_ERR};")
         self._status.setStyleSheet(f"color: {_ZB_ERR};")
-        self._status.setText(text[:90])
+        self._status.setText(text[:80])
         self._timer.setText("")
-        self._refresh_width()
+        self._relayout()
 
     def show_saved(self, filepath: str, filename: str, preview: str):
-        self._follow = False
         self._t_blink.stop()
         self._t_clock.stop()
         self._dot.setText("✓")
@@ -230,8 +247,7 @@ class _PipeWidget(QWidget):
         self._status.setStyleSheet(f"color: {_ZB_OK};")
         self._status.setText(f"saved  {filename}")
         self._timer.setText("")
-        self._preview.setStyleSheet(f"color: {_ZB_DIM};")
-        self._preview.setText(preview[:90] + ("…" if len(preview) > 90 else ""))
+        self._preview.setText(preview[:100] + ("…" if len(preview) > 100 else ""))
         self._preview.show()
         for btn in (self._btn_file, self._btn_folder):
             try:
@@ -242,7 +258,7 @@ class _PipeWidget(QWidget):
         self._btn_file.clicked.connect(lambda: _os_open(str(fp)))
         self._btn_folder.clicked.connect(lambda: _os_open(str(fp.parent)))
         self._btn_row.show()
-        self._refresh_width()
+        self._relayout()
 
     # ── Input ──
 
@@ -523,13 +539,14 @@ class PipeHud(QObject):
     """
     clicked = Signal()               # emitted when user clicks the HUD
 
-    _open_sig   = Signal(int, int)
-    _status_sig = Signal(str, str, str)   # text, icon, color
-    _result_sig = Signal(str)
-    _error_sig  = Signal(str)
-    _saved_sig  = Signal(str, str, str)   # filepath, filename, preview
-    _close_sig  = Signal()
-    _prereq_sig = Signal(object, object, object)  # checks, on_proceed, on_cancel
+    _open_sig          = Signal(int, int)
+    _status_sig        = Signal(str, str, str)   # text, icon, color
+    _result_sig        = Signal(str)
+    _error_sig         = Signal(str)
+    _saved_sig         = Signal(str, str, str)   # filepath, filename, preview
+    _close_sig         = Signal()
+    _prereq_sig        = Signal(object, object, object)  # checks, on_proceed, on_cancel
+    _sched_close_sig   = Signal(int)             # ms — schedules a delayed close on main thread
 
     def __init__(self):
         super().__init__()
@@ -542,10 +559,16 @@ class PipeHud(QObject):
         self._saved_sig.connect(self._do_saved)
         self._close_sig.connect(self._do_close)
         self._prereq_sig.connect(self._do_prereq)
+        self._sched_close_sig.connect(self._do_sched_close)
 
     # ── Public API (any thread) ──
 
     def open(self, cx: int, cy: int):
+        self._open_sig.emit(cx, cy)
+
+    def open_at_cursor(self):
+        """Open HUD at the current cursor position. Safe to call from any thread."""
+        cx, cy = _win32_cursor()
         self._open_sig.emit(cx, cy)
 
     def set_status(self, text: str, icon: str = "◌", color: str = "#89b4fa"):
@@ -568,7 +591,7 @@ class PipeHud(QObject):
         cx, cy = _win32_cursor()
         self._open_sig.emit(cx, cy)
         self._status_sig.emit(text, "▸", _ZB_ACCENT)
-        QTimer.singleShot(ms, self._do_close)
+        self._sched_close_sig.emit(ms)   # safe cross-thread delayed close
 
     def show_prereq(self, checks: dict, on_proceed, on_cancel=None):
         """Show non-blocking prereq overlay near cursor. Safe to call from any thread."""
@@ -579,9 +602,18 @@ class PipeHud(QObject):
     @Slot(int, int)
     def _do_open(self, cx: int, cy: int):
         if self._widget:
+            try:
+                self._widget.destroyed.disconnect()
+            except RuntimeError:
+                pass
             self._widget.close()
-        self._widget = _PipeWidget(cx, cy, stop_cb=self.clicked.emit)
-        self._widget.destroyed.connect(lambda: setattr(self, "_widget", None))
+        w = _PipeWidget(cx, cy, stop_cb=self.clicked.emit)
+        self._widget = w
+        w.destroyed.connect(lambda: self._clear_widget(w))
+
+    def _clear_widget(self, w):
+        if self._widget is w:
+            self._widget = None
 
     @Slot(str, str, str)
     def _do_status(self, text: str, icon: str, color: str):
@@ -606,9 +638,17 @@ class PipeHud(QObject):
             self._widget.show_saved(filepath, filename, preview)
             QTimer.singleShot(2500, self._do_close)
 
+    @Slot(int)
+    def _do_sched_close(self, ms: int):
+        QTimer.singleShot(ms, self._do_close)
+
     @Slot()
     def _do_close(self):
         if self._widget:
+            try:
+                self._widget.destroyed.disconnect()
+            except RuntimeError:
+                pass
             self._widget.close()
             self._widget = None
 
@@ -658,12 +698,21 @@ class VoiceChatHud(QObject):
     @Slot()
     def _do_open(self):
         if self._widget:
+            try:
+                self._widget.destroyed.disconnect()
+            except RuntimeError:
+                pass
             self._widget.close()
-        self._widget = _VoiceChatWidget(
+        w = _VoiceChatWidget(
             stop_cb=self.closed.emit,
             interrupt_cb=self.clicked.emit,
         )
-        self._widget.destroyed.connect(lambda: setattr(self, "_widget", None))
+        self._widget = w
+        w.destroyed.connect(lambda: self._clear_vc_widget(w))
+
+    def _clear_vc_widget(self, w):
+        if self._widget is w:
+            self._widget = None
 
     @Slot(str, str)
     def _do_state(self, state: str, sub: str):
@@ -673,6 +722,10 @@ class VoiceChatHud(QObject):
     @Slot()
     def _do_close(self):
         if self._widget:
+            try:
+                self._widget.destroyed.disconnect()
+            except RuntimeError:
+                pass
             self._widget.close()
             self._widget = None
 
