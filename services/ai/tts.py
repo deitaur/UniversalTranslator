@@ -6,6 +6,7 @@ Text-to-speech — two engines selectable in Settings:
 
 import ctypes
 import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -25,14 +26,42 @@ def _current_engine() -> str:
     return config.get("tts_engine", "gtts")
 
 
+# ── ffmpeg tempo (pitch-preserving speed change) ──────────────────────────────
+
+def _apply_tempo(src: str, speed: float) -> str:
+    """Return a new temp MP3 with speed changed but pitch preserved (ffmpeg atempo).
+    atempo range per filter is 0.5–2.0; chain two filters for >2.0x.
+    Falls back to src unchanged if ffmpeg is unavailable."""
+    if abs(speed - 1.0) < 0.05:
+        return src
+    out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    out.close()
+    if speed <= 2.0:
+        af = f"atempo={speed:.4f}"
+    else:
+        af = f"atempo=2.0,atempo={speed / 2.0:.4f}"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-filter:a", af, out.name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=30, check=True,
+        )
+        return out.name
+    except Exception as e:
+        log.warning("ffmpeg atempo failed (%s) — playing at 1.0x", e)
+        try:
+            os.unlink(out.name)
+        except Exception:
+            pass
+        return src
+
+
 # ── MCI MP3 player (Windows built-in, works with gTTS output) ────────────────
 
-def _mci_play(path: str, speed: float = 1.0):
+def _mci_play(path: str):
     """Play an MP3 via Windows MCI. Blocks until done or _stop_event is set."""
     alias = "_tts_play_"
     _mci.mciSendStringW(f'open "{path}" type mpegvideo alias {alias}', None, 0, None)
-    if abs(speed - 1.0) > 0.05:
-        _mci.mciSendStringW(f'set {alias} speed {int(speed * 1000)}', None, 0, None)
     _mci.mciSendStringW(f'play {alias}', None, 0, None)
     buf = ctypes.create_unicode_buffer(128)
     try:
@@ -59,20 +88,26 @@ def _speak_gtts(text: str, lang_code: str, speed: float = 1.0):
     _GTTS_LANG_MAP = {"zh": "zh-CN", "pt": "pt-BR"}
     gtts_lang = _GTTS_LANG_MAP.get(lang_code[:2], lang_code[:2])
 
+    tmp_src = None
+    tmp_fast = None
     try:
         tts = gTTS(text=text, lang=gtts_lang, slow=False)
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.close()
-        tts.save(tmp.name)
-        _mci_play(tmp.name, speed)
+        tmp_src = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp_src.close()
+        tts.save(tmp_src.name)
+        play_path = _apply_tempo(tmp_src.name, speed)
+        tmp_fast = play_path if play_path != tmp_src.name else None
+        _mci_play(play_path)
     except Exception as e:
         log.warning("gTTS speak failed: %s — falling back to SAPI", e)
         _speak_sapi(text, lang_code, speed)
     finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
+        for p in (tmp_fast, tmp_src.name if tmp_src else None):
+            if p:
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
 
 
 # ── Windows SAPI engine ───────────────────────────────────────────────────────
