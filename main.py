@@ -165,13 +165,22 @@ def on_hotkey_clipboard():
         set_clipboard_text(translated)
         show_toast("Translated to clipboard")
 
+def _flash(text: str):
+    from ui.hud import get_pipe_hud
+    hud = get_pipe_hud()
+    if hud:
+        hud.flash_action(text)
+
 def on_hotkey_whisper():
+    _flash("voice → text  Ctrl+Alt+W")
     on_tray_whisper()
 
 def on_hotkey_dictation_handler():
+    _flash("dictation  Ctrl+Alt+D")
     on_hotkey_dictation()
 
 def on_hotkey_negotiator():
+    _flash("negotiator  Ctrl+Alt+N")
     text = _grab_selected_text()
     if text and text.strip():
         show_chat_window("Rewrite this to sound more persuasive and professional:\n\n" + text, mode="negotiator")
@@ -179,12 +188,15 @@ def on_hotkey_negotiator():
         show_chat_window(mode="negotiator")
 
 def on_hotkey_teacher():
+    _flash("teacher  Ctrl+Alt+E")
     show_chat_window(mode="teacher")
 
 def on_hotkey_voicechat_handler():
+    _flash("voice chat  Ctrl+Alt+V")
     on_hotkey_voicechat()
 
 def on_hotkey_polish_handler():
+    _flash("voice polish  Ctrl+Alt+F")
     on_hotkey_polish()
 
 def _register_hotkeys():
@@ -342,12 +354,29 @@ def main():
         setup_chat()            # chat window controller
         setup_vc_hud()          # voice chat HUD
 
+        # ── Tool shelf (ZBrush-style icon strip) ──
+        from ui.tool_shelf import init_tool_shelf, show_tool_shelf
+        from services.ai.whisper import on_tray_whisper as _wh
+        _shelf_tools = [
+            ("T",  "trnsl",  "Translation popup",     "Ctrl+Alt+T", on_hotkey_popup),
+            ("R",  "repl",   "Replace in-place",      "Ctrl+Alt+R", on_hotkey_replace),
+            ("C",  "clip",   "Translate clipboard",   "Ctrl+Alt+Y", on_hotkey_clipboard),
+            ("🎙", "stt",    "Voice → text",           "Ctrl+Alt+W", on_hotkey_whisper),
+            ("✨", "polish", "Voice polish → paste",   "Ctrl+Alt+F", on_hotkey_polish_handler),
+            ("N",  "nego",   "Negotiator chat",        "Ctrl+Alt+N", on_hotkey_negotiator),
+            ("E",  "teach",  "Teacher chat",           "Ctrl+Alt+E", on_hotkey_teacher),
+            ("📞", "vc",     "Voice chat dialog",      "Ctrl+Alt+V", on_hotkey_voicechat_handler),
+            ("⚙",  "set",    "Settings",               "",           on_tray_settings),
+        ]
+        init_tool_shelf(_shelf_tools)
+
         create_tray_icon({
             "translate_clipboard": on_tray_translate,
             "settings":            on_tray_settings,
             "whisper":             on_tray_whisper,
             "role_chat":           on_tray_role_chat,
             "voice_chat_dialog":   show_voice_chat_dialog,
+            "tool_shelf":          show_tool_shelf,
             "quit":                on_tray_quit,
         })
         log.info("Tray icon created, entering Qt event loop")

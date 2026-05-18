@@ -140,7 +140,16 @@ def _close_pipe_window():
 # ── Prereq dialog ──────────────────────────────────────────────────────────────
 
 def _show_prereq_dialog(checks: dict, on_proceed):
-    """Show a PySide6 prereq-check dialog. Safe to call from any thread."""
+    """Show ZBrush-style prereq overlay near cursor. Safe to call from any thread."""
+    from ui.hud import get_pipe_hud, init_pipe_hud
+    hud = get_pipe_hud()
+    if hud is None:
+        hud = init_pipe_hud(_stop_recording)
+    hud.show_prereq(checks, on_proceed=on_proceed)
+
+
+def _show_prereq_dialog_legacy(checks: dict, on_proceed):
+    """Legacy modal dialog — kept for reference but no longer used."""
     import subprocess
     from PySide6.QtCore import QObject, Qt, Signal, Slot
     from PySide6.QtGui import QFont
@@ -486,7 +495,5 @@ def on_tray_whisper():
     if _all_required_ok(checks):
         threading.Thread(target=_start_recording, daemon=True).start()
     else:
-        _show_prereq_dialog(
-            checks,
-            on_proceed=lambda: threading.Thread(target=_start_recording, daemon=True).start(),
-        )
+        _show_prereq_dialog(checks,
+            on_proceed=lambda: threading.Thread(target=_start_recording, daemon=True).start())

@@ -309,7 +309,11 @@ def create_tray_icon(callbacks: dict):
 
     def _on_activated(reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            callbacks["translate_clipboard"]()
+            shelf_cb = callbacks.get("tool_shelf")
+            if shelf_cb:
+                shelf_cb()
+            else:
+                callbacks["translate_clipboard"]()
 
     tray.activated.connect(_on_activated)
     tray.show()
