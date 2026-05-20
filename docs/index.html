@@ -268,8 +268,8 @@
 
             <p
                 class="text-lg sm:text-xl text-gray-500 mb-10 sm:mb-12 max-w-2xl mx-auto font-light leading-relaxed px-2">
-                ИИ-ассистент, живущий в трее. Мгновенно переводит, улучшает текст и работает в любом окне. Никаких
-                лишних вкладок.
+                ИИ-ассистент, живущий в трее. Переводит, переписывает и диктует — голосом или текстом — прямо в активном окне.
+                Никаких лишних вкладок. Никакого переключения контекста.
             </p>
 
             <!-- Интерактивное демо -->
@@ -411,59 +411,50 @@
                     Весь арсенал под рукой</h3>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                    <div
-                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
-                        <div class="mb-4 inline-block"><kbd
-                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
-                                Alt + R</kbd></div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + R</kbd></div>
                         <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">In-place Замена</h4>
-                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Мгновенно заменяет выделенный текст
-                            на перевод прямо в активном окне.</p>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Выделил текст — нажал — перевод вставлен на место. Работает в любом окне.</p>
                     </div>
-                    <div
-                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
-                        <div class="mb-4 inline-block"><kbd
-                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
-                                Alt + T</kbd></div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + T</kbd></div>
                         <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Smart Popup</h4>
-                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Отображает элегантное всплывающее
-                            окно с переводом поверх всех программ.</p>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Всплывающее окно с переводом рядом с курсором. Кликни — закроется.</p>
                     </div>
-                    <div
-                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
-                        <div class="mb-4 inline-block"><kbd
-                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
-                                Alt + Y</kbd></div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + Y</kbd></div>
                         <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Фоновый Буфер</h4>
-                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Незаметно переводит последнее
-                            скопированное содержимое буфера обмена.</p>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Переводит содержимое буфера обмена без открытия дополнительных окон.</p>
                     </div>
-                    <div
-                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
-                        <div class="mb-4 inline-block"><kbd
-                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
-                                Alt + N</kbd></div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + W</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Whisper Диктовка</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Голосовой ввод через Whisper. Автоматически определяет язык, транскрибирует и вставляет текст.</p>
+                    </div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + F</kbd></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Voice Polish</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Полирует голосовой ввод через Ollama: убирает слова-паразиты, исправляет структуру, сохраняет смысл.</p>
+                    </div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + N</kbd></div>
                         <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">ИИ-Переговорщик</h4>
-                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Переписывает текст в дипломатичном и
-                            уверенном корпоративном тоне.</p>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Переписывает грубый текст в дипломатичный корпоративный тон.</p>
                     </div>
-                    <div
-                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
-                        <div class="mb-4 inline-block"><kbd
-                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
-                                Alt + E</kbd></div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><kbd class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl + Alt + E</kbd></div>
                         <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">ИИ-Учитель</h4>
-                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Анализирует грамматику и предлагает
-                            продвинутые native-like формулировки.</p>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Анализирует грамматику и предлагает native-like формулировки с объяснением.</p>
                     </div>
-                    <div
-                        class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group border-dashed opacity-70">
-                        <div class="mb-4 inline-block"><kbd
-                                class="group-hover:text-white group-hover:border-b-gray-400 transition-colors">Ctrl +
-                                Alt + W</kbd></div>
-                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Whisper Voice</h4>
-                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Голосовой ввод. Диктуйте текст, а ИИ
-                            сам расставит знаки препинания.</p>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><span class="text-gray-600 font-mono text-xs">AI</span></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Voice Chat</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">Голосовой диалог с локальным Ollama. STT → LLM → TTS. Работает офлайн, без API-ключей.</p>
+                    </div>
+                    <div class="bg-[#050508] border border-nyBorder p-5 sm:p-6 rounded-2xl hover:border-gray-600 transition-all duration-300 group">
+                        <div class="mb-4 inline-block"><span class="text-gray-600 font-mono text-xs">AI</span></div>
+                        <h4 class="text-gray-300 font-bold mb-2 text-sm sm:text-base">Web Search</h4>
+                        <p class="text-gray-500 text-xs sm:text-sm leading-relaxed">DuckDuckGo через Ollama tool-calling прямо в чате. Актуальные данные без браузера.</p>
                     </div>
                 </div>
             </div>
@@ -499,10 +490,9 @@
             <div class="mb-8 p-6 rounded-xl border border-gray-800/50 bg-[#050508] text-left sm:text-center shadow-lg">
                 <h4 class="text-neonCyan font-mono text-xs uppercase tracking-widest mb-3">TL;DR / Техническая суть</h4>
                 <p class="text-gray-400 text-sm sm:text-base leading-relaxed">
-                    Утилита для Windows, живущая в трее. Переводит, корректирует и переписывает текст <strong
-                        class="text-gray-200 font-medium">напрямую в активном окне</strong> (IDE, мессенджер, браузер)
-                    по глобальным шорткатам. <br class="hidden sm:block">
-                    Полностью исключает копипасту, открытие дополнительных вкладок и потерю фокуса.
+                    Windows tray-утилита. 7 глобальных хоткеев: перевод, голосовой ввод (Whisper), Voice Polish, AI-чат с Ollama, Web Search.
+                    Всё работает <strong class="text-gray-200 font-medium">прямо в активном окне</strong> — IDE, мессенджер, браузер.<br class="hidden sm:block">
+                    Никакого переключения вкладок. Никаких API-ключей для локальных AI-функций.
                 </p>
             </div>
 
