@@ -29,14 +29,6 @@ Unicode True
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEFINISHPAGE_BITMAP_NOSTRETCH
 
-; ---- Variables ----
-Var ChkWhisper
-Var ChkSpellCheck
-Var ChkOllama
-Var InstallWhisper
-Var InstallSpellCheck
-Var InstallOllama
-Var PythonPath
 
 ; ============================================================
 ;  PAGES
@@ -53,8 +45,6 @@ Var PythonPath
 ; Install directory
 !insertmacro MUI_PAGE_DIRECTORY
 
-; AI Components page (custom)
-Page custom AIComponentsPage AIComponentsPageLeave
 
 ; Install files
 !insertmacro MUI_PAGE_INSTFILES
@@ -75,43 +65,6 @@ Page custom AIComponentsPage AIComponentsPageLeave
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "Russian"
 
-; ============================================================
-;  AI COMPONENTS CUSTOM PAGE
-; ============================================================
-
-Function AIComponentsPage
-    nsDialogs::Create 1018
-    Pop $0
-
-    ${NSD_CreateGroupBox} 5% 0 90% 85u "Optional AI Components"
-    Pop $0
-
-    ${NSD_CreateLabel} 10% 14u 80% 20u "Select which AI features to install.$\r$\nThese require Python and pip. Skip if unsure."
-    Pop $0
-
-    ${NSD_CreateCheckbox} 10% 40u 80% 12u "Voice Dictation (faster-whisper + sounddevice) ~200 MB"
-    Pop $ChkWhisper
-
-    ${NSD_CreateCheckbox} 10% 56u 80% 12u "Russian Spell Check (transformers + torch) ~700 MB"
-    Pop $ChkSpellCheck
-
-    ${NSD_CreateCheckbox} 10% 72u 80% 12u "Download and install Ollama for local AI chat"
-    Pop $ChkOllama
-
-    ${NSD_CreateGroupBox} 5% 92u 90% 40u "Note"
-    Pop $0
-
-    ${NSD_CreateLabel} 10% 104u 80% 24u "AI components are installed via pip and require Python 3.10+.$\r$\nYou can install them later: Settings > the app will show instructions."
-    Pop $0
-
-    nsDialogs::Show
-FunctionEnd
-
-Function AIComponentsPageLeave
-    ${NSD_GetState} $ChkWhisper $InstallWhisper
-    ${NSD_GetState} $ChkSpellCheck $InstallSpellCheck
-    ${NSD_GetState} $ChkOllama $InstallOllama
-FunctionEnd
 
 ; ============================================================
 ;  INSTALLER SECTIONS
@@ -154,56 +107,6 @@ Section "Core Application" SecCore
     WriteRegStr HKCU "Software\${APP_NAME}" "InstallDir" "$INSTDIR"
 SectionEnd
 
-Section "AI Components" SecAI
-    ; Find Python
-    nsExec::ExecToStack 'python --version'
-    Pop $0
-    Pop $PythonPath
-
-    ${If} $0 != 0
-        ; Try python3
-        nsExec::ExecToStack 'python3 --version'
-        Pop $0
-        ${If} $0 != 0
-            MessageBox MB_OK|MB_ICONINFORMATION "Python not found. AI components require Python 3.10+.$\r$\n$\r$\nInstall Python from https://python.org and then run:$\r$\npip install faster-whisper sounddevice numpy"
-            Goto ai_done
-        ${EndIf}
-    ${EndIf}
-
-    ; Install Whisper
-    ${If} $InstallWhisper == ${BST_CHECKED}
-        DetailPrint "Installing Voice Dictation components..."
-        nsExec::ExecToLog 'pip install faster-whisper sounddevice numpy --quiet'
-        Pop $0
-        ${If} $0 != 0
-            DetailPrint "Warning: Whisper installation had issues. You can retry manually."
-        ${Else}
-            DetailPrint "Voice Dictation installed successfully."
-        ${EndIf}
-    ${EndIf}
-
-    ; Install Spell Check
-    ${If} $InstallSpellCheck == ${BST_CHECKED}
-        DetailPrint "Installing Spell Check components (this may take a while)..."
-        nsExec::ExecToLog 'pip install transformers torch --quiet'
-        Pop $0
-        ${If} $0 != 0
-            DetailPrint "Warning: Spell Check installation had issues. You can retry manually."
-        ${Else}
-            DetailPrint "Spell Check installed successfully."
-        ${EndIf}
-    ${EndIf}
-
-    ; Install Ollama
-    ${If} $InstallOllama == ${BST_CHECKED}
-        DetailPrint "Opening Ollama download page..."
-        ExecShell "open" "https://ollama.com/download"
-        MessageBox MB_OK|MB_ICONINFORMATION "Ollama download page opened in your browser.$\r$\n$\r$\nAfter installing Ollama, run this command:$\r$\n  ollama pull qwen2.5:14b"
-        DetailPrint "Ollama: user directed to download page."
-    ${EndIf}
-
-    ai_done:
-SectionEnd
 
 ; ============================================================
 ;  HELPER FUNCTIONS

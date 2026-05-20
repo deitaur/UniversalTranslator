@@ -44,10 +44,10 @@ def _check_prerequisites() -> dict:
 
     checks["packages"] = {
         "ok": not pkg_missing,
-        "label": "Python-пакеты",
+        "label": "Утилиты ИИ",
         "detail": ("OK" if not pkg_missing
-                   else "Не установлены: " + ", ".join(pkg_missing)
-                        + "\n  pip install " + " ".join(pkg_missing)),
+                   else "Для работы функции необходимо докачать модули."),
+        "missing_pip": pkg_missing,
     }
 
     if checks["packages"]["ok"]:

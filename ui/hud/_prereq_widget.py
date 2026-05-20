@@ -32,11 +32,8 @@ class _PrereqWidget(QWidget):
         self._checks     = checks
         self._pkg_missing = []
         for key, c in checks.items():
-            if key == "packages" and c["ok"] is False:
-                for part in c.get("detail", "").split("\n"):
-                    if "pip install" in part:
-                        self._pkg_missing.extend(
-                            part.strip().replace("pip install ", "").split())
+            if key == "packages" and c.get("missing_pip"):
+                self._pkg_missing.extend(c["missing_pip"])
 
         self._build_ui()
         sw = _screen_w()
@@ -58,7 +55,7 @@ class _PrereqWidget(QWidget):
         # ── Header row ──
         hdr = QHBoxLayout()
         hdr.setSpacing(5)
-        t = QLabel("prerequisites")
+        t = QLabel("Необходимые компоненты")
         t.setFont(_bf)
         t.setStyleSheet(f"color: {_ZB_TEXT};")
         hdr.addWidget(t)
@@ -114,14 +111,14 @@ class _PrereqWidget(QWidget):
                f" padding:2px 8px; font-size:8pt; }}"
                f"QPushButton:hover {{ background:#686868; }}")
 
-        cancel = QPushButton("cancel")
+        cancel = QPushButton("Отмена")
         cancel.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
         cancel.setStyleSheet(_bs)
         cancel.clicked.connect(self._cancel)
         btn_row.addWidget(cancel)
 
         if self._pkg_missing:
-            install = QPushButton("install packages")
+            install = QPushButton("Скачать и установить")
             install.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
             install.setStyleSheet(_bs.replace(_ZB_TEXT, "#c8a040"))
             install.clicked.connect(self._install)
@@ -129,7 +126,7 @@ class _PrereqWidget(QWidget):
 
         ready = all(c["ok"] is not False for c in self._checks.values()
                     if not c.get("optional"))
-        proceed_lbl = "proceed" if ready else "proceed anyway"
+        proceed_lbl = "Продолжить" if ready else "Всё равно продолжить"
         proceed_col = _ZB_OK if ready else "#c8a040"
         proceed = QPushButton(proceed_lbl)
         proceed.setFont(QFont(_ZB_FONT, _ZB_SIZE - 1))
