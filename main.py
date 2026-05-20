@@ -44,7 +44,7 @@ from app.tray_actions import (
 from app.hotkey_handlers import (
     on_hotkey_clipboard, on_hotkey_polish_handler, on_hotkey_popup,
     on_hotkey_replace, on_hotkey_whisper, on_hotkey_negotiator,
-    on_hotkey_teacher, on_hotkey_voicechat_handler,
+    on_hotkey_websearch, on_hotkey_voicechat_handler,
 )
 from services.ai.voice_chat import setup_hud as setup_vc_hud
 from services.ai.whisper import on_tray_whisper
@@ -120,7 +120,7 @@ def main():
             ("🎙", "stt",    "Voice → text",           "Ctrl+Alt+W", on_hotkey_whisper),
             ("✨", "polish", "Voice polish → paste",   "Ctrl+Alt+F", on_hotkey_polish_handler),
             ("N",  "nego",   "Negotiator chat",        "Ctrl+Alt+N", on_hotkey_negotiator),
-            ("E",  "teach",  "Teacher chat",           "Ctrl+Alt+E", on_hotkey_teacher),
+            ("W",  "web",    "Web search",             "Ctrl+Alt+S", on_hotkey_websearch),
             ("📞", "vc",     "Voice chat dialog",      "Ctrl+Alt+V", on_hotkey_voicechat_handler),
             ("⚙",  "set",    "Settings",               "",           on_tray_settings),
         ]
