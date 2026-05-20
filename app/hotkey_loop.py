@@ -10,14 +10,14 @@ from globals import stop_event
 from ui.notifications import show_toast
 from win32.hotkeys import (
     HOTKEY_CLIPBOARD, HOTKEY_DICTATION, HOTKEY_NEGOTIATOR, HOTKEY_POLISH,
-    HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_TEACHER, HOTKEY_VOICECHAT,
+    HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_WEBSEARCH, HOTKEY_VOICECHAT,
     HOTKEY_WHISPER, WM_HOTKEY, hotkey_mods_vk, register_hotkey, unregister_hotkey,
 )
 
 from app.hotkey_handlers import (
     on_hotkey_clipboard, on_hotkey_dictation_handler, on_hotkey_negotiator,
     on_hotkey_polish_handler, on_hotkey_popup, on_hotkey_replace,
-    on_hotkey_teacher, on_hotkey_voicechat_handler, on_hotkey_whisper,
+    on_hotkey_websearch, on_hotkey_voicechat_handler, on_hotkey_whisper,
 )
 
 log = logging.getLogger("hotkey_loop")
@@ -25,7 +25,7 @@ log = logging.getLogger("hotkey_loop")
 _HOTKEY_IDS = [
     HOTKEY_POPUP, HOTKEY_REPLACE, HOTKEY_CLIPBOARD,
     HOTKEY_WHISPER, HOTKEY_DICTATION, HOTKEY_VOICECHAT,
-    HOTKEY_NEGOTIATOR, HOTKEY_TEACHER, HOTKEY_POLISH,
+    HOTKEY_NEGOTIATOR, HOTKEY_WEBSEARCH, HOTKEY_POLISH,
 ]
 
 _HOTKEY_PAIRS = [
@@ -36,7 +36,7 @@ _HOTKEY_PAIRS = [
     ("dictation",  HOTKEY_DICTATION),
     ("voicechat",  HOTKEY_VOICECHAT),
     ("negotiator", HOTKEY_NEGOTIATOR),
-    ("teacher",    HOTKEY_TEACHER),
+    ("web_search", HOTKEY_WEBSEARCH),
     ("polish",     HOTKEY_POLISH),
 ]
 
@@ -80,7 +80,7 @@ def hotkey_listener():
         HOTKEY_DICTATION:   ("dictation",  on_hotkey_dictation_handler),
         HOTKEY_VOICECHAT:   ("voicechat",  on_hotkey_voicechat_handler),
         HOTKEY_NEGOTIATOR:  ("negotiator", on_hotkey_negotiator),
-        HOTKEY_TEACHER:     ("teacher",    on_hotkey_teacher),
+        HOTKEY_WEBSEARCH:   ("web_search", on_hotkey_websearch),
         HOTKEY_POLISH:      ("polish",     on_hotkey_polish_handler),
     }
     log.info("Hotkey listener entering message loop")

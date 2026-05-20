@@ -115,9 +115,9 @@ def on_hotkey_negotiator():
         show_chat_window(mode="negotiator")
 
 
-def on_hotkey_teacher():
-    _flash("teacher  Ctrl+Alt+E")
-    show_chat_window(mode="teacher")
+def on_hotkey_websearch():
+    _flash("web_search  Ctrl+Alt+S")
+    show_chat_window(mode="web_search")
 
 
 def on_hotkey_voicechat_handler():

@@ -228,7 +228,7 @@ def _build_qt_menu(callbacks: dict) -> QMenu:
     try:
         from storage.roles import load_roles
         roles = load_roles()
-        hotkey_hints = {"negotiator": "  (Ctrl+Alt+N)", "teacher": "  (Ctrl+Alt+E)"}
+        hotkey_hints = {"negotiator": "  (Ctrl+Alt+N)", "web_search": "  (Ctrl+Alt+S)"}
         for rid, role in roles.items():
             if role.get("show_in_tray", True):
                 label = role.get("name", rid) + hotkey_hints.get(rid, "")

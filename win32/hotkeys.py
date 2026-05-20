@@ -17,7 +17,7 @@ HOTKEY_REPLACE = 2
 HOTKEY_CLIPBOARD = 3
 HOTKEY_WHISPER = 4
 HOTKEY_NEGOTIATOR = 5
-HOTKEY_TEACHER = 6
+HOTKEY_WEBSEARCH = 6
 HOTKEY_DICTATION  = 7
 HOTKEY_VOICECHAT  = 8
 HOTKEY_POLISH     = 9
@@ -44,7 +44,7 @@ DEFAULT_HOTKEYS = {
     "clipboard":  "Ctrl+Alt+Y",
     "whisper":    "Ctrl+Alt+W",
     "negotiator": "Ctrl+Alt+N",
-    "teacher":    "Ctrl+Alt+E",
+    "web_search": "Ctrl+Alt+S",
     "dictation":  "Ctrl+Alt+D",
     "voicechat":  "Ctrl+Alt+V",
     "polish":     "Ctrl+Alt+F",
