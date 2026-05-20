@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Constants
 APP_NAME = "Universal Translator"
-APP_VERSION = "3.2"
+APP_VERSION = "3.3"
 BUILD_DATE = "2026-05-15"
 CONFIG_DIR = Path(os.environ.get("APPDATA", ".")) / "DeepLTranslator"
 CONFIG_FILE = CONFIG_DIR / "config.json"

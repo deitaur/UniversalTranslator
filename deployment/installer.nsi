@@ -10,7 +10,7 @@
 
 ; ---- App Info ----
 !define APP_NAME "Universal Translator"
-!define APP_VERSION "3.1"
+!define APP_VERSION "3.3"
 !define APP_EXE "UniversalTranslator.exe"
 !define APP_PUBLISHER "Universal Translator"
 !define CONFIG_DIR "$APPDATA\DeepLTranslator"
