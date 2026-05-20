@@ -108,9 +108,10 @@ class _IconBtn(QLabel):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tooltip)
 
-    def set_icon(self, icon: str, color: str, tooltip: str):
+    def set_icon(self, icon: str, color: str, hover_color: str, tooltip: str):
         self.setText(icon)
         self._default_color = color
+        self._hover_color = hover_color
         self.setStyleSheet(f"color: {color}; background: transparent;")
         self.setToolTip(tooltip)
 
