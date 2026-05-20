@@ -1,246 +1,245 @@
 """
 Voice Polish — Ctrl+Alt+F
-Record speech → Whisper STT → Ollama (friendly tone + punctuation)
-→ clipboard → Ctrl+V into active field.
-
-Progress shown in the mouse-cursor HUD (same as dictation/whisper).
-Click HUD or press Ctrl+Alt+F again to stop recording early.
+Record speech → Whisper STT → Ollama (format/polish) → clipboard → Ctrl+V.
+Progress shown in the bottom-right HUD.
 """
 
 import threading
 import time
 import logging
-import numpy as np
 
 log = logging.getLogger("polish")
 
-_is_running  = False
-_MIN_RMS     = 0.008   # minimum audio level — below this = probably silence
-_MIN_SECONDS = 0.5     # ignore clips shorter than 0.5 s of real speech
+# ── Whisper hallucination filter ──────────────────────────────────────────────
 
-# Whisper hallucinations it generates on silence (multilingual)
 _HALLUCINATIONS = {
-    "продолжение следует",
-    "спасибо за просмотр",
-    "подпишитесь на канал",
-    "до свидания",
-    "thank you for watching",
-    "thanks for watching",
-    "please subscribe",
-    "to be continued",
-    "subscribe",
-    "[музыка]",
-    "[music]",
-    "[аплодисменты]",
-    "[applause]",
+    "продолжение следует", "спасибо за просмотр", "подпишитесь на канал",
+    "до свидания", "thank you for watching", "thanks for watching",
+    "please subscribe", "to be continued", "subscribe",
+    "[музыка]", "[music]", "[аплодисменты]", "[applause]",
 }
-
-_POLISH_PROMPT = (
-    "You receive a raw speech-to-text transcription. Your only task:\n"
-    "1. Add correct punctuation (periods, commas, question marks, etc.).\n"
-    "2. Fix obvious speech-recognition errors without changing meaning.\n"
-    "3. Make the tone warm, friendly, and natural — like a quick message to a colleague.\n"
-    "4. Keep the ORIGINAL language of the text (do NOT translate).\n"
-    "5. Output ONLY the final polished text — no explanations, no quotes, no comments.\n\n"
-    "Transcription:\n"
-)
-
-_FORMAT_PROMPT = """\
-You are a senior editor and technical writer. You receive a raw voice-to-text recording — unstructured, with filler words, repetitions, and stream-of-consciousness speech.
-
-YOUR MISSION: transform it into a clean, professional document that a busy reader can scan in seconds.
-
-STEP 1 — CLEAN:
-• Remove all filler words: "ну", "вот", "э-э", "как бы", "в общем", "собственно", "типа", "um", "uh", "like", "you know", "basically", "so", "right"
-• Remove repetitions and false starts
-• Fix grammar and spelling silently
-
-STEP 2 — EXTRACT & GROUP:
-• Identify every distinct idea, task, or topic
-• Group closely related points together
-• Discard nothing — every real idea must appear in the output
-
-STEP 3 — STRUCTURE (choose the format that fits the content):
-  • 1–2 simple thoughts → clean paragraph, no headers
-  • List of items / ideas → bullet list with "• " prefix
-  • Sequence of steps → numbered list  1.  2.  3.
-  • Action items / tasks → checklist with "☐ " prefix
-  • Multiple distinct topics → TOPIC HEADING: on its own line, then content below
-  • Mixed content → combine the above as needed
-  Separate blocks with a blank line.
-  Do NOT use markdown symbols (#, *, **, ~~) — plain text only.
-
-STEP 4 — OUTPUT:
-Output ONLY the final structured text. No preamble, no explanations, no "Here is your text:", no quotes around the result.
-Keep the ORIGINAL language of the input — do NOT translate.
-
-RAW INPUT:
-"""
 
 
 def _is_hallucination(text: str) -> bool:
-    """Return True if whisper just made something up (silence artifact)."""
     cleaned = text.strip().lower().rstrip(".!?,…").strip()
     return cleaned in _HALLUCINATIONS or len(cleaned) < 3
 
 
-def _audio_has_speech(audio: np.ndarray) -> bool:
-    """True if the recording contains enough non-silence."""
-    rms = float(np.sqrt(np.mean(audio ** 2)))
-    log.debug("Audio RMS: %.4f (min=%.4f)", rms, _MIN_RMS)
-    return rms >= _MIN_RMS
+# ── Prompts ───────────────────────────────────────────────────────────────────
+
+# Prompts are used as the SYSTEM message — raw text goes separately as USER message.
+
+# ── Quick polish: punctuation + light cleanup (gemma-friendly: short & direct) ─
+_POLISH_SYSTEM = """\
+Edit this voice-to-text. Remove filler words (um, uh, like, ну, вот, э-э, как бы, типа, значит). Fix punctuation. Keep the original language. Output ONLY the corrected text — no introduction, no explanation."""
+
+# ── Full editorial reformat ───────────────────────────────────────────────────
+_FORMAT_SYSTEM = """\
+You are a professional text editor. The user sends a raw voice-to-text transcript. Your job: clean and restructure it. Output only the final result.
+
+CLEAN: Delete filler words (do not replace, just remove).
+  Russian: ну, вот, ну вот, э-э, ммм, как бы, в общем, собственно, типа, значит, это самое, короче, понимаешь, то есть, так сказать, на самом деле
+  English: um, uh, like, you know, so, right, basically, actually, I mean, kind of, well, anyway
+Delete repetitions, false starts, self-corrections. Fix grammar and spelling.
+
+STRUCTURE: Choose the right format for the content.
+  One or two ideas → clean paragraph.
+  List of items → bullet list, each item on its own line starting with "- ".
+  Steps or sequence → numbered list: 1. 2. 3.
+  Tasks or to-do → checklist lines starting with "[ ] ".
+  Multiple separate topics → topic name in CAPITALS + colon on its own line, then content below.
+  Mixed content → combine formats, blank line between blocks.
+  Plain text only — no markdown symbols (#, *, **, ~~).
+
+OUTPUT: Start directly with the content. Do not write "Here is", "Sure", "Вот текст", or any preamble. Keep the original language, do not translate."""
 
 
-def _start_polish():
-    global _is_running
-    _is_running = True
 
-    from services.ai.whisper import (
-        _open_pipe_window, _pipe_set_status, _pipe_show_error,
-        _load_whisper_model, _stop_recording, _setup_click_hook,
-        _pipe_show_result,
-    )
-    from utils.language import get_source_lang
+# ── HUD helpers (thin wrappers so _start_polish doesn't import whisper at top) ─
 
-    _stop_recording.clear()
+def _hud_open():
+    from services.ai.whisper import _open_pipe_window
     _open_pipe_window()
 
+
+def _hud_status(text, icon="◌", color="#89b4fa"):
+    from services.ai.whisper import _pipe_set_status
+    _pipe_set_status(text, icon, color)
+
+
+def _hud_error(text):
+    from services.ai.whisper import _pipe_show_error
+    _pipe_show_error(text)
+
+
+def _hud_result(text, label="готово"):
+    from ui.hud import get_pipe_hud
+    hud = get_pipe_hud()
+    if hud:
+        hud.show_result(text, label)
+
+
+# ── Pipeline ──────────────────────────────────────────────────────────────────
+
+def _start_polish():
+    from services.ai.recorder import AudioSession, start_click_hook, load_whisper_model
+    from utils.language import get_source_lang
+
+    session = AudioSession(max_seconds=120)
     try:
-        import sounddevice as sd
+        session.__enter__()
+    except RuntimeError:
+        _hud_error("Запись уже идёт — нажмите Ctrl+Alt+F ещё раз чтобы остановить")
+        return
 
-        sample_rate = 16000
-        audio_data  = []
+    _hud_open()
 
-        def _cb(indata, frames, t, status):
-            audio_data.append(indata.copy())
+    try:
+        start_click_hook(session.stop_event)
 
-        threading.Thread(target=_setup_click_hook, daemon=True).start()
-
-        # Recording phase — HUD blinks red while listening
-        # (The HUD shows "Запись… (клик — стоп)" by default while blinking)
-        # We just wait until click or timeout
-        with sd.InputStream(callback=_cb, channels=1,
-                            samplerate=sample_rate, blocksize=1024):
-            t0 = time.time()
-            while not _stop_recording.is_set():
-                if (time.time() - t0) >= 120:
-                    break
-                time.sleep(0.05)
-
-        if not audio_data:
-            _pipe_show_error("Нет аудио — проверьте микрофон")
+        # ── Stage 1: record ───────────────────────────────────────────────────
+        audio = session.record()
+        if audio is None:
+            _hud_error("Нет аудио — проверьте микрофон")
             return
 
-        audio = np.concatenate(audio_data, axis=0).flatten()
-        duration = len(audio) / sample_rate
-        log.debug("Recorded %.1f s", duration)
-
-        # ── Check volume ─────────────────────────────────────────────────────
-        if not _audio_has_speech(audio):
-            _pipe_show_error("Ничего не слышно — говорите громче или выберите другой микрофон")
-            return
-
-        if duration < _MIN_SECONDS:
-            _pipe_show_error("Слишком короткая запись — говорите дольше")
-            return
-
-        # ── Stage 1: load model ───────────────────────────────────────────────
-        _pipe_set_status("Загрузка Whisper…", "⏳", "#89b4fa")
-        try:
-            model = _load_whisper_model()
-        except Exception as e:
-            _pipe_show_error(f"Ошибка загрузки модели: {str(e)[:55]}")
+        err = session.validate(audio)
+        if err:
+            _hud_error(err)
             return
 
         # ── Stage 2: transcribe ───────────────────────────────────────────────
+        _hud_status("Загрузка Whisper…", "⏳", "#89b4fa")
+        try:
+            model = load_whisper_model()
+        except Exception as e:
+            _hud_error(f"Ошибка загрузки модели: {str(e)[:55]}")
+            return
+
         src_lang     = get_source_lang()
         whisper_lang = None if src_lang == "en" else src_lang
-        _pipe_set_status(f"Распознаю речь ({src_lang.upper()})…", "◌", "#89b4fa")
+        _hud_status(f"Распознаю речь ({src_lang.upper()})…", "◌", "#89b4fa")
         try:
-            segments, _ = model.transcribe(audio, language=whisper_lang, beam_size=5)
-            raw_text    = " ".join(seg.text for seg in segments).strip()
+            # beam_size=1 — быстрее; LLM всё равно исправит ошибки транскрипции
+            segments, _info = model.transcribe(audio, language=whisper_lang, beam_size=1)
+            raw_text = " ".join(seg.text for seg in segments).strip()
         except Exception as e:
-            _pipe_show_error(f"Ошибка распознавания: {str(e)[:55]}")
+            _hud_error(f"Ошибка распознавания: {str(e)[:55]}")
             return
 
         log.debug("Whisper raw: %r", raw_text[:100])
-
         if not raw_text or _is_hallucination(raw_text):
-            _pipe_show_error("Речь не распознана — говорите чётче или выберите другой микрофон")
+            _hud_error("Речь не распознана — говорите чётче или выберите другой микрофон")
             return
 
-        # ── Stage 3: AI edit via Ollama (streaming so we see progress) ──────────
+        # ── Stage 3: Ollama polish (streaming) ────────────────────────────────
         from config import config
         from services.ai.ollama import check_ollama, get_polish_model
-        import requests, json as _json
+        import requests
+        import json as _json
 
-        use_format = config.get("format_output", True)
-        prompt     = _FORMAT_PROMPT if use_format else _POLISH_PROMPT
-        model_name = get_polish_model()
+        format_mode = config.get("format_output", True)
+        system_msg  = _FORMAT_SYSTEM if format_mode else _POLISH_SYSTEM
+        model_name  = get_polish_model(format_mode)
         preview_in = raw_text[:30] + ("…" if len(raw_text) > 30 else "")
-        _pipe_set_status(f"[{model_name.split(':')[0]}] редактирую…  «{preview_in}»", "✨", "#cba6f7")
-        log.debug("Polish model: %s", model_name)
+        _hud_status(f"[{model_name.split(':')[0]}] редактирую…  «{preview_in}»", "✨", "#cba6f7")
+
         polished = raw_text
+        ai_ok    = False
 
         if not check_ollama():
             log.warning("Ollama unavailable — pasting raw text")
-            _pipe_set_status("Ollama недоступна — вставляю как есть", "⚠", "#f9e2af")
-            time.sleep(1.2)
+            _hud_status("Ollama недоступна — вставляю без редактуры", "⚠", "#f9e2af")
+            time.sleep(1.5)
         else:
-            body = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": prompt + raw_text}],
-                "stream": True,
-                "options": {"num_predict": 1024},
-            }
-            chunks = []
-            elapsed_s = [0]
+            ollama_url = "http://localhost:11434/api/chat"
+            # Gemma игнорирует system-роль — инструкцию кладём в user-сообщение.
+            # Qwen/Llama → нормальный system+user split.
+            if "gemma" in model_name.lower():
+                messages = [
+                    {"role": "user",
+                     "content": f"{system_msg}\n\n---\n{raw_text}"},
+                ]
+            else:
+                messages = [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user",   "content": raw_text},
+                ]
+            # num_ctx=8192 — явно задаём окно, чтобы промпт + ответ не упирались
+            # в дефолтные 2048 токенов Ollama
+            options = {"num_predict": 2048, "num_ctx": 8192}
+            log.debug("system=%d chars  user=%d chars  model=%s",
+                      len(system_msg), len(raw_text), model_name)
+
+            # ── Pass 1: streaming ─────────────────────────────────────────────
+            t0     = time.time()
+            result = ""
             try:
-                with requests.post(
-                    "http://localhost:11434/api/chat",
-                    json=body, timeout=240, stream=True,
-                ) as r:
+                body = {"model": model_name, "messages": messages,
+                        "stream": True, "options": options}
+                with requests.post(ollama_url, json=body,
+                                   timeout=300, stream=True) as r:
                     r.raise_for_status()
-                    t0 = time.time()
+                    chunks = []
                     for line in r.iter_lines(decode_unicode=True):
                         if not line:
                             continue
                         try:
                             data = _json.loads(line)
                         except Exception:
+                            log.debug("Unparseable line: %r", line[:80])
                             continue
                         token = data.get("message", {}).get("content", "")
                         if token:
                             chunks.append(token)
-                        elapsed_s[0] = int(time.time() - t0)
-                        # update HUD every ~20 tokens
-                        if len(chunks) % 20 == 0:
-                            partial = "".join(chunks)[-30:]
-                            _pipe_set_status(
-                                f"[{model_name.split(':')[0]}] {elapsed_s[0]}s  …{partial}",
+                        if chunks and len(chunks) % 20 == 0:
+                            partial = "".join(chunks)[-28:]
+                            _hud_status(
+                                f"[{model_name.split(':')[0]}] {int(time.time()-t0)}s  …{partial}",
                                 "✨", "#cba6f7",
                             )
                         if data.get("done"):
+                            log.debug("Ollama done reason=%r tokens=%d",
+                                      data.get("done_reason"), len(chunks))
                             break
                 result = "".join(chunks).strip()
-                if result:
-                    polished = result
-                    log.debug("Polish done in %ds, %d chars", elapsed_s[0], len(polished))
-                else:
-                    log.warning("Polish returned empty — using raw text")
+                log.debug("Streaming result: %d chars", len(result))
             except requests.exceptions.Timeout:
-                log.warning("Polish timeout after 240s — using raw text")
-                _pipe_set_status("Модель не ответила — вставляю как есть", "⚠", "#f9e2af")
-                time.sleep(1.5)
+                log.warning("Polish streaming timeout")
             except Exception as e:
-                log.warning("Ollama edit error: %s — using raw text", e)
-                _pipe_set_status(f"Ошибка ИИ: {str(e)[:40]}", "⚠", "#f38ba8")
+                log.warning("Ollama streaming error: %s", e)
+
+            # ── Pass 2: non-streaming retry if streaming returned empty ───────
+            if not result:
+                log.warning("Streaming returned empty — retrying non-streaming")
+                _hud_status(f"[{model_name.split(':')[0]}] повтор (no-stream)…",
+                            "◌", "#cba6f7")
+                try:
+                    body2 = {"model": model_name, "messages": messages,
+                             "stream": False, "options": options}
+                    r2 = requests.post(ollama_url, json=body2, timeout=300)
+                    r2.raise_for_status()
+                    result = (r2.json()
+                              .get("message", {})
+                              .get("content", "")
+                              .strip())
+                    log.debug("Non-streaming result: %d chars", len(result))
+                except Exception as e:
+                    log.warning("Non-streaming retry failed: %s", e)
+
+            if result:
+                polished = result
+                ai_ok    = True
+                log.debug("Polish OK %ds %d chars", int(time.time()-t0), len(polished))
+            else:
+                log.warning("Both passes returned empty")
+                _hud_status("Модель не ответила — вставляю как есть", "⚠", "#f9e2af")
                 time.sleep(2.0)
 
-        log.debug("Polished: %r", polished[:100])
+        log.debug("Polished (ai=%s): %r", ai_ok, polished[:120])
 
         # ── Stage 4: clipboard + paste ────────────────────────────────────────
-        _pipe_set_status("Вставляю в поле…", "📋", "#a6e3a1")
+        _hud_status("Вставляю в поле…", "📋", "#a6e3a1")
         try:
             from win32.clipboard import set_clipboard_text
             from win32.keyboard import send_ctrl_v
@@ -248,26 +247,34 @@ def _start_polish():
             time.sleep(0.15)
             send_ctrl_v()
         except Exception as e:
-            _pipe_show_error(f"Ошибка вставки: {str(e)[:55]}")
+            _hud_error(f"Ошибка вставки: {str(e)[:55]}")
             return
 
-        # Show first ~60 chars of result in HUD, then auto-close
-        _pipe_show_result(polished[:80] + ("…" if len(polished) > 80 else ""))
+        # HUD result: clearly show whether AI actually edited or fell back
+        if ai_ok:
+            label   = "✨ отредактировано"
+            preview = polished[:100] + ("…" if len(polished) > 100 else "")
+        else:
+            label   = "⚠ вставлено без редактуры  (сырой текст)"
+            # Show the raw transcription so user can see what was pasted
+            preview = raw_text[:100] + ("…" if len(raw_text) > 100 else "")
+        _hud_result(preview, label)
 
     except Exception as e:
         log.error("polish error: %s", e, exc_info=True)
-        _pipe_show_error(f"Ошибка: {str(e)[:60]}")
+        _hud_error(f"Ошибка: {str(e)[:60]}")
     finally:
-        _is_running = False
-        _stop_recording.clear()
+        session.__exit__(None, None, None)
 
+
+# ── Public entry point ────────────────────────────────────────────────────────
 
 def on_hotkey_polish():
-    """Toggle voice-polish recording (Ctrl+Alt+F)."""
-    global _is_running
-    if _is_running:
-        from services.ai.whisper import _stop_recording
-        _stop_recording.set()
+    """Toggle voice-polish (Ctrl+Alt+F). Second press cancels an active session."""
+    from services.ai.recorder import stop_active, is_recording
+
+    if is_recording():
+        stop_active()
         return
 
     from services.ai.whisper import _check_prerequisites, _all_required_ok, _show_prereq_dialog

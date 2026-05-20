@@ -6,7 +6,6 @@ Status is shown in a Qt HUD overlay (ui.hud.PipeHud).
 import ctypes
 import ctypes.wintypes
 import threading
-import time
 from pathlib import Path
 from win32.clipboard import set_clipboard_text
 import globals as g
@@ -107,14 +106,14 @@ def _get_hud():
     from ui.hud import get_pipe_hud, init_pipe_hud
     hud = get_pipe_hud()
     if hud is None:
-        hud = init_pipe_hud(_stop_recording)
+        from services.ai.recorder import stop_active
+        hud = init_pipe_hud(stop_active)
     return hud
 
 
 def _open_pipe_window():
-    """Open the recording status HUD near the cursor."""
-    cx, cy = _cursor_pos()
-    _get_hud().open(cx, cy)
+    """Open the recording status HUD in the bottom-right corner."""
+    _get_hud().open()
 
 
 def _pipe_set_status(text: str, icon: str = "◌", icon_color: str = "#89b4fa"):
@@ -141,193 +140,15 @@ def _close_pipe_window():
 
 def _show_prereq_dialog(checks: dict, on_proceed):
     """Show ZBrush-style prereq overlay near cursor. Safe to call from any thread."""
-    from ui.hud import get_pipe_hud, init_pipe_hud
-    hud = get_pipe_hud()
-    if hud is None:
-        hud = init_pipe_hud(_stop_recording)
-    hud.show_prereq(checks, on_proceed=on_proceed)
-
-
-def _show_prereq_dialog_legacy(checks: dict, on_proceed):
-    """Legacy modal dialog — kept for reference but no longer used."""
-    import subprocess
-    from PySide6.QtCore import QObject, Qt, Signal, Slot
-    from PySide6.QtGui import QFont
-    from PySide6.QtWidgets import (
-        QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
-    )
-
-    _C = {"bg": "#1e1e2e", "surface": "#313244", "card": "#181825",
-          "text": "#cdd6f4", "muted": "#6c7086", "accent": "#89b4fa",
-          "green": "#a6e3a1", "yellow": "#f9e2af", "red": "#f38ba8"}
-
-    class _Launcher(QObject):
-        _sig = Signal()
-        def __init__(self):
-            super().__init__()
-            self._sig.connect(self._run)
-        def launch(self):
-            self._sig.emit()
-        @Slot()
-        def _run(self):
-            pkg_missing = []
-            for key, c in checks.items():
-                if key == "packages" and c["ok"] is False:
-                    for part in c["detail"].split("\n"):
-                        if "pip install" in part:
-                            pkg_missing.extend(part.strip().replace("pip install ", "").split())
-
-            dlg = QDialog()
-            dlg.setWindowTitle("Whisper — проверка зависимостей")
-            dlg.setWindowFlags(
-                dlg.windowFlags() |
-                Qt.WindowType.WindowStaysOnTopHint
-            )
-            dlg.setFixedWidth(560)
-            dlg.setStyleSheet(f"background: {_C['bg']}; color: {_C['text']};")
-
-            root = QVBoxLayout(dlg)
-            root.setContentsMargins(0, 0, 0, 0)
-            root.setSpacing(0)
-
-            # Header
-            hdr = QFrame()
-            hdr.setFixedHeight(44)
-            hdr.setStyleSheet(f"background: {_C['surface']}; border: none;")
-            hdr_lo = QHBoxLayout(hdr)
-            hdr_lo.setContentsMargins(14, 0, 14, 0)
-            lbl = QLabel("🎙  Whisper — проверка перед запуском")
-            lbl.setFont(QFont("Segoe UI Semibold", 12))
-            lbl.setStyleSheet(f"color: {_C['text']}; background: transparent;")
-            hdr_lo.addWidget(lbl)
-            root.addWidget(hdr)
-
-            # Body — check rows
-            body = QFrame()
-            body.setStyleSheet(f"background: {_C['card']}; border: none;")
-            body_lo = QVBoxLayout(body)
-            body_lo.setContentsMargins(14, 8, 14, 8)
-            body_lo.setSpacing(4)
-
-            for key, c in checks.items():
-                ok, optional = c["ok"], c.get("optional", False)
-                if ok is True:
-                    icon, color = "✓", _C["green"]
-                elif ok is False and optional:
-                    icon, color = "⚠", _C["yellow"]
-                elif ok is False:
-                    icon, color = "✗", _C["red"]
-                else:
-                    icon, color = "·", _C["muted"]
-
-                row = QHBoxLayout()
-                row.setSpacing(6)
-
-                ico = QLabel(icon)
-                ico.setFont(QFont("Segoe UI Bold", 13))
-                ico.setStyleSheet(f"color: {color}; background: transparent;")
-                ico.setFixedWidth(18)
-                row.addWidget(ico)
-
-                name = QLabel(c["label"])
-                name.setFont(QFont("Segoe UI Semibold", 11))
-                name.setStyleSheet(f"color: {_C['text']}; background: transparent;")
-                name.setFixedWidth(160)
-                row.addWidget(name)
-
-                detail_color = _C["muted"] if ok else color
-                detail = QLabel(c["detail"])
-                detail.setFont(QFont("Segoe UI", 10))
-                detail.setStyleSheet(f"color: {detail_color}; background: transparent;")
-                detail.setWordWrap(True)
-                row.addWidget(detail, 1)
-
-                body_lo.addLayout(row)
-
-            root.addWidget(body)
-
-            # Separator
-            sep = QFrame()
-            sep.setFixedHeight(1)
-            sep.setStyleSheet(f"background: {_C['surface']};")
-            root.addWidget(sep)
-
-            # Footer
-            footer = QFrame()
-            footer.setFixedHeight(52)
-            footer.setStyleSheet(f"background: {_C['surface']}; border: none;")
-            foot_lo = QHBoxLayout(footer)
-            foot_lo.setContentsMargins(12, 10, 12, 10)
-            foot_lo.addStretch()
-
-            _btn = "border-radius: 6px; padding: 3px 12px; font-family: 'Segoe UI'; font-size: 11px;"
-
-            cancel = QPushButton("Отмена")
-            cancel.setFixedHeight(32)
-            cancel.setStyleSheet(
-                f"QPushButton {{ {_btn} background: {_C['surface']}; color: {_C['muted']}; border: 1px solid {_C['card']}; }}"
-                f"QPushButton:hover {{ background: {_C['card']}; }}"
-            )
-            cancel.clicked.connect(dlg.reject)
-            foot_lo.addWidget(cancel)
-
-            if pkg_missing:
-                def _install():
-                    try:
-                        subprocess.Popen(
-                            ["cmd", "/k", "pip", "install"] + pkg_missing,
-                            creationflags=subprocess.CREATE_NEW_CONSOLE,
-                        )
-                    except Exception as e:
-                        from ui.notifications import show_toast
-                        show_toast(f"Ошибка: {e}")
-
-                install_btn = QPushButton("Установить пакеты")
-                install_btn.setFixedHeight(32)
-                install_btn.setStyleSheet(
-                    f"QPushButton {{ {_btn} background: {_C['surface']}; color: {_C['yellow']}; border: 1px solid {_C['card']}; }}"
-                    f"QPushButton:hover {{ background: {_C['card']}; }}"
-                )
-                install_btn.clicked.connect(_install)
-                foot_lo.addWidget(install_btn)
-
-            ready = _all_required_ok(checks)
-            proceed_text = "Начать запись" if ready else "Начать всё равно"
-            proceed_color = _C["accent"] if ready else _C["yellow"]
-            proceed_hover = "#7ba4e8" if ready else "#e8d59f"
-
-            def _do_proceed():
-                dlg.accept()
-                on_proceed()
-
-            proceed_btn = QPushButton(proceed_text)
-            proceed_btn.setFixedHeight(32)
-            proceed_btn.setStyleSheet(
-                f"QPushButton {{ {_btn} background: {proceed_color}; color: {_C['bg']}; border: none; }}"
-                f"QPushButton:hover {{ background: {proceed_hover}; }}"
-            )
-            proceed_btn.clicked.connect(_do_proceed)
-            foot_lo.addWidget(proceed_btn)
-
-            root.addWidget(footer)
-
-            cx, cy = _cursor_pos()
-            dlg.adjustSize()
-            dlg.move(max(cx - 200, 20), max(cy - 160, 20))
-            dlg.exec()
-
-    launcher = _Launcher()
-    launcher.launch()
+    _get_hud().show_prereq(checks, on_proceed=on_proceed)
 
 
 # ── Model loading ──────────────────────────────────────────────────────────────
 
 def _load_whisper_model():
-    global _whisper_model
-    if _whisper_model is None:
-        from faster_whisper import WhisperModel
-        _whisper_model = WhisperModel(WHISPER_MODEL_ID, device="cpu", compute_type="int8")
-    return _whisper_model
+    """Thread-safe Whisper model loader (delegates to recorder singleton)."""
+    from services.ai.recorder import load_whisper_model
+    return load_whisper_model()
 
 
 def _load_spell_model():
@@ -354,72 +175,42 @@ def _fix_russian_spelling(text: str) -> str:
         return text
 
 
-# ── Click-hook (stop on any mouse click) ──────────────────────────────────────
+# ── Click-hook (kept for dictation.py backward compat) ────────────────────────
 
 def _setup_click_hook():
-    WH_MOUSE_LL    = 14
-    WM_LBUTTONDOWN = 0x0201
-    WM_RBUTTONDOWN = 0x0204
-
-    HOOKPROC = ctypes.CFUNCTYPE(
-        ctypes.c_long, ctypes.c_int,
-        ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM,
-    )
-    user32 = ctypes.windll.user32
-
-    def _cb(nCode, wParam, lParam):
-        if nCode >= 0 and wParam in (WM_LBUTTONDOWN, WM_RBUTTONDOWN):
-            _stop_recording.set()
-        return user32.CallNextHookEx(None, nCode, wParam, lParam)
-
-    ref  = HOOKPROC(_cb)
-    hook = user32.SetWindowsHookExW(WH_MOUSE_LL, ref, None, 0)
-    msg  = ctypes.wintypes.MSG()
-    while not _stop_recording.is_set():
-        if user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
-            user32.TranslateMessage(ctypes.byref(msg))
-            user32.DispatchMessageW(ctypes.byref(msg))
-        time.sleep(0.01)
-    user32.UnhookWindowsHookEx(hook)
-    del ref
+    """Deprecated: use recorder.start_click_hook(session.stop_event) instead."""
+    from services.ai.recorder import _click_hook_loop
+    _click_hook_loop(_stop_recording)
 
 
 # ── Main recording pipeline ────────────────────────────────────────────────────
 
 def _start_recording():
     global _is_recording
-    _is_recording = True
-    _stop_recording.clear()
+    from services.ai.recorder import AudioSession, start_click_hook
 
-    # Open the status window next to the cursor
+    session = AudioSession(max_seconds=120)
+    try:
+        session.__enter__()
+    except RuntimeError:
+        _pipe_show_error("Другой модуль уже записывает звук")
+        return
+
+    _is_recording = True
     _open_pipe_window()
 
     try:
-        import sounddevice as sd
-        import numpy as np
+        start_click_hook(session.stop_event)
 
-        sample_rate  = 16000
-        duration_max = 120
-        audio_data   = []
-
-        def _audio_cb(indata, frames, t, status):
-            audio_data.append(indata.copy())
-
-        threading.Thread(target=_setup_click_hook, daemon=True).start()
-
-        with sd.InputStream(callback=_audio_cb, channels=1,
-                            samplerate=sample_rate, blocksize=1024):
-            t0 = time.time()
-            while not _stop_recording.is_set():
-                if (time.time() - t0) >= duration_max:
-                    break
-                time.sleep(0.05)
-
-        if not audio_data:
+        audio = session.record()
+        if audio is None:
             _pipe_show_error("Нет аудио — ничего не записано")
             return
 
-        audio = np.concatenate(audio_data, axis=0).flatten()
+        err = session.validate(audio)
+        if err:
+            _pipe_show_error(err)
+            return
 
         # ── Stage 1: load / transcribe ──
         _pipe_set_status("Загрузка модели…")
@@ -477,17 +268,17 @@ def _start_recording():
         _pipe_show_error(f"Whisper error: {str(e)[:60]}")
     finally:
         _is_recording = False
-        _stop_recording.clear()
+        session.__exit__(None, None, None)
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
 def on_tray_whisper():
     """Toggle voice recording. Shows prereq dialog if something is missing."""
-    global _is_recording
+    from services.ai.recorder import is_recording, stop_active
 
-    if _is_recording:
-        _stop_recording.set()
+    if is_recording():
+        stop_active()
         return
 
     checks = _check_prerequisites()

@@ -89,15 +89,24 @@ def is_english(text):
 
 def detect_language(text: str) -> str:
     """
-    Detect the language of *text* using Google Translate's free auto-detect.
+    Detect the language of *text*.
+    Fast local path for clear English / non-Latin text; HTTP only for ambiguous cases.
     Returns a BCP-47 language code (e.g. 'ru', 'en', 'de').
     Falls back to source_lang config value on any error.
     """
     if not text.strip():
         return get_source_lang()
+    # Fast path: pure ASCII-letter text → English
+    if is_english(text):
+        return "en"
+    # Fast path: clearly non-Latin script (Cyrillic, CJK, Arabic…) → no HTTP needed
+    total_alpha = sum(1 for ch in text if ch.isalpha())
+    non_ascii   = sum(1 for ch in text if ch.isalpha() and ord(ch) > 127)
+    if total_alpha > 0 and non_ascii / total_alpha > 0.7:
+        return get_source_lang()
+    # Ambiguous Latin text (German, French, Spanish…) → ask Google
     try:
         import requests
-        # Use max 300 chars — enough for reliable detection, fast request
         r = requests.get(
             "https://translate.googleapis.com/translate_a/single",
             params={"client": "gtx", "sl": "auto", "tl": "en",
@@ -107,10 +116,8 @@ def detect_language(text: str) -> str:
         )
         r.raise_for_status()
         data = r.json()
-        # data[2] = detected source language code ("ru", "en", "de", …)
         if isinstance(data, list) and len(data) > 2 and isinstance(data[2], str):
             return data[2]
     except Exception:
         pass
-    # Offline fallback: character-ratio heuristic
     return "en" if is_english(text) else get_source_lang()

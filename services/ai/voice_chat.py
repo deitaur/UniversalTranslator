@@ -221,8 +221,6 @@ def _voice_chat_loop():
 
 def on_hotkey_voicechat():
     """Toggle voice chat session."""
-    global _is_active
-
     if _is_active:
         _stop_evt.set()
         from services.ai import tts as _tts

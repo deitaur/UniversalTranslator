@@ -15,6 +15,8 @@ kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
 kernel32.GlobalUnlock.restype = ctypes.c_bool
 kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
 kernel32.GlobalAlloc.restype = ctypes.c_void_p
+kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+kernel32.GlobalFree.restype = ctypes.c_void_p
 user32.GetClipboardData.argtypes = [ctypes.c_uint]
 user32.GetClipboardData.restype = ctypes.c_void_p
 user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
@@ -62,8 +64,10 @@ def set_clipboard_text(text):
                 ptr = kernel32.GlobalLock(h)
                 ctypes.memmove(ptr, encoded, len(encoded))
                 kernel32.GlobalUnlock(h)
-                user32.SetClipboardData(CF_UNICODETEXT, h)
-                return True
+                if not user32.SetClipboardData(CF_UNICODETEXT, h):
+                    kernel32.GlobalFree(h)   # OS does NOT own the handle on failure
+                    return False
+                return True   # OS now owns h — do not free
             finally:
                 user32.CloseClipboard()
         time.sleep(0.05)  # clipboard locked, retry

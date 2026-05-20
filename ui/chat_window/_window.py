@@ -1,18 +1,19 @@
-"""Chat popup — PySide6. Role selector, sessions, streaming AI responses."""
+"""ChatWindow — main chat popup with role selector, sessions, streaming AI."""
 
 import threading
 import uuid
 from typing import Optional
 
-from PySide6.QtCore import QObject, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSizePolicy, QTextEdit,
-    QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from config import APP_NAME, ICON_FILE, C, config, save_config_full
+
+from ui.chat_window._bubble import _Bubble
 
 FONT_FAMILIES = ["Segoe UI", "Verdana", "Cascadia Code"]
 FONT_SIZES    = {"Small": 11, "Medium": 13, "Large": 15}
@@ -35,105 +36,14 @@ def _btn(text, bg, fg, hover=None, w=None, h=32):
     return b
 
 
-# ── Bubble widget ─────────────────────────────────────────────────────────────
-
-class _Bubble(QWidget):
-    """A single chat message bubble with selectable text and a copy button."""
-
-    def __init__(self, role: str, text: str, role_label: str, role_color: str,
-                 font_family: str, font_size: int):
-        super().__init__()
-        self._role      = role
-        self._text      = text
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-
-        is_user    = (role == "user")
-        bubble_bg  = C["card"] if is_user else C["surface"]
-        text_color = C["text"] if is_user else C["green"]
-        pad_l, pad_r = (60, 10) if is_user else (10, 60)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(pad_l, 2, pad_r, 2)
-        outer.setSpacing(2)
-
-        # Role row
-        role_row = QHBoxLayout()
-        role_row.setSpacing(6)
-        rl = QLabel("You" if is_user else role_label)
-        rl.setFont(QFont("Segoe UI", 9))
-        rl.setStyleSheet(f"color: {C['muted'] if is_user else role_color}; background: transparent;")
-        role_row.addWidget(rl)
-
-        copy_btn = QPushButton("[copy]")
-        copy_btn.setFont(QFont("Segoe UI", 8))
-        copy_btn.setFlat(True)
-        copy_btn.setStyleSheet(
-            f"QPushButton {{ color:{C['muted']}; background:transparent; border:none; }}"
-            f"QPushButton:hover {{ color:{C['text']}; }}"
-        )
-        copy_btn.clicked.connect(self._copy)
-        role_row.addWidget(copy_btn)
-        role_row.addStretch()
-        outer.addLayout(role_row)
-
-        # Bubble
-        bubble = QFrame()
-        bubble.setStyleSheet(
-            f"QFrame {{ background:{bubble_bg}; border:1px solid {C['border']};"
-            f" border-radius:8px; }}"
-            f"QTextEdit {{ background:{bubble_bg}; color:{text_color};"
-            f" border:none; }}"
-        )
-        b_lo = QVBoxLayout(bubble)
-        b_lo.setContentsMargins(0, 0, 0, 0)
-
-        self._text_edit = QTextEdit()
-        self._text_edit.setFont(QFont(font_family, font_size))
-        self._text_edit.setReadOnly(True)
-        self._text_edit.setPlainText(text)
-        self._text_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self._text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        self._text_edit.document().contentsChanged.connect(self._adjust_height)
-        b_lo.addWidget(self._text_edit)
-        outer.addWidget(bubble)
-
-        QTimer.singleShot(0, self._adjust_height)
-
-    def _adjust_height(self):
-        doc_h = int(self._text_edit.document().size().height()) + 12
-        self._text_edit.setFixedHeight(max(doc_h, 36))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # Re-measure after Qt has reflowed the document to the new viewport width
-        QTimer.singleShot(0, self._adjust_height)
-
-    def set_text(self, text: str):
-        self._text = text
-        self._text_edit.setPlainText(text)
-
-    def update_font(self, family: str, size: int):
-        self._text_edit.setFont(QFont(family, size))
-        QTimer.singleShot(0, self._adjust_height)
-
-    def _copy(self):
-        from win32.clipboard import set_clipboard_text
-        set_clipboard_text(self._text)
-
-    def get_text(self) -> str:
-        return self._text
-
-
-# ── Chat window ───────────────────────────────────────────────────────────────
-
 class ChatWindow(QWidget):
     # Signals for background→main-thread communication
     _token_sig    = Signal(str)   # streaming token (accumulated text)
     _done_sig     = Signal(str)   # full response finished
     _error_sig    = Signal(str)   # error text
-    _enable_sig   = Signal()      # re-enable input
-    _status_sig   = Signal(str)   # tool status (e.g. "🔍 Searching…")
+    _enable_sig        = Signal()   # re-enable input (after streaming/error)
+    _compress_done_sig = Signal()   # compress finished — rebuild bubbles + re-enable
+    _status_sig        = Signal(str)   # tool status (e.g. "🔍 Searching…")
 
     def __init__(self, initial_text: str = "", mode: str = "negotiator"):
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint)
@@ -155,6 +65,7 @@ class ChatWindow(QWidget):
         self._done_sig.connect(self._on_done)
         self._error_sig.connect(self._on_error)
         self._enable_sig.connect(self._re_enable)
+        self._compress_done_sig.connect(self._after_compress)
         self._status_sig.connect(self._on_status)
 
         self._load_session()
@@ -216,11 +127,20 @@ class ChatWindow(QWidget):
         self._role_combo.currentIndexChanged.connect(self._on_role_change)
         hdr_lo.addWidget(self._role_combo)
 
-        from services.ai.ollama import get_ollama_model as _gom
-        model_lbl = QLabel(_gom())
+        model_lbl = QLabel("…")
         model_lbl.setFont(QFont("Segoe UI", 9))
         model_lbl.setStyleSheet(f"color:{C['muted']}; background:transparent;")
         hdr_lo.addWidget(model_lbl)
+        # Load model name in background — avoids blocking HTTP call on Qt main thread
+        import threading
+        def _load_model_name():
+            try:
+                from services.ai.ollama import get_ollama_model
+                name = get_ollama_model()
+                QTimer.singleShot(0, lambda: model_lbl.setText(name))
+            except Exception:
+                pass
+        threading.Thread(target=_load_model_name, daemon=True).start()
 
         lang_values = ["Auto", "English", "Russian"]
         _lmap_to = {"Same as input": "Auto", "English": "English", "Russian": "Russian"}
@@ -584,6 +504,7 @@ class ChatWindow(QWidget):
         self._status_lbl.setVisible(False)
         self._entry.setEnabled(True)
         self._send_btn.setEnabled(True)
+        self._compress_btn.setEnabled(True)
         self._entry.setFocus()
 
     # ── Context compression ───────────────────────────────────────────────────
@@ -607,10 +528,9 @@ class ChatWindow(QWidget):
                 self._history = [{"role": "user",
                                    "content": f"[Сжатый контекст предыдущего диалога]:\n{summary}"}]
                 self._save_session()
-                # rebuild on main thread
-                self._enable_sig.emit()
+                self._compress_done_sig.emit()
             except Exception:
-                self._enable_sig.emit()
+                self._compress_done_sig.emit()
 
         threading.Thread(target=_task, daemon=True).start()
 
@@ -620,69 +540,7 @@ class ChatWindow(QWidget):
             self._compress_context()
 
     @Slot()
-    def _re_enable(self):
-        self._entry.setEnabled(True)
-        self._send_btn.setEnabled(True)
-        self._compress_btn.setEnabled(True)
-        self._entry.setFocus()
-        # rebuild bubbles (needed after compress)
+    def _after_compress(self):
         if self._streaming_bubble is None:
             self._rebuild_bubbles()
-
-
-# ── Controller (thread-safe show/switch-mode) ─────────────────────────────────
-
-class _ChatController(QObject):
-    _show_sig = Signal(str, str)   # initial_text, mode
-
-    def __init__(self):
-        super().__init__()
-        self._window: Optional[ChatWindow] = None
-        self._show_sig.connect(self._do_show)
-
-    def show(self, initial_text: str = "", mode: str = "negotiator"):
-        self._show_sig.emit(initial_text, mode)
-
-    @Slot(str, str)
-    def _do_show(self, initial_text: str, mode: str):
-        if self._window is not None:
-            try:
-                if mode != self._window._mode:
-                    self._window._mode = mode
-                    self._window._update_title()
-                    idx = next((i for i in range(self._window._role_combo.count())
-                                if self._window._role_combo.itemData(i) == mode), -1)
-                    if idx >= 0:
-                        self._window._role_combo.setCurrentIndex(idx)
-                self._window.show()
-                self._window.activateWindow()
-                self._window.raise_()
-                if initial_text.strip():
-                    self._window._send(initial_text)
-                return
-            except RuntimeError:
-                self._window = None
-
-        self._window = ChatWindow(initial_text, mode)
-        self._window.destroyed.connect(lambda: setattr(self, "_window", None))
-        self._window.show()
-        self._window.activateWindow()
-
-
-_controller: Optional[_ChatController] = None
-
-
-def setup_chat() -> _ChatController:
-    """Create the singleton. Call from the Qt main thread in main.py."""
-    global _controller
-    if _controller is None:
-        _controller = _ChatController()
-    return _controller
-
-
-def show_chat_window(initial_text: str = "", mode: str = "negotiator"):
-    if _controller is not None:
-        _controller.show(initial_text, mode)
-    else:
-        import logging
-        logging.getLogger("chat_window").warning("show_chat_window called before setup_chat")
+        self._re_enable()

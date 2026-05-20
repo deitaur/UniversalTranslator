@@ -6,15 +6,12 @@ Reuses the Whisper model cache and status-window from whisper.py.
 
 import datetime
 import threading
-import time
 from pathlib import Path
 
 from config import config
-# Share model cache, status window, click-hook, and stop event with whisper module
 from services.ai.whisper import (
     _open_pipe_window, _pipe_set_status, _pipe_show_error,
     _load_whisper_model, _fix_russian_spelling,
-    _setup_click_hook, _stop_recording,
 )
 
 _is_dictating = False
@@ -67,36 +64,30 @@ def _show_saved_popup(filepath: Path, text: str):
 
 def _start_dictation():
     global _is_dictating
-    _is_dictating = True
-    _stop_recording.clear()
+    from services.ai.recorder import AudioSession, start_click_hook
 
+    session = AudioSession(max_seconds=300)   # max 5 min for dictation
+    try:
+        session.__enter__()
+    except RuntimeError:
+        _pipe_show_error("Другой модуль уже записывает звук")
+        return
+
+    _is_dictating = True
     _open_pipe_window()
 
     try:
-        import sounddevice as sd
-        import numpy as np
+        start_click_hook(session.stop_event)
 
-        sample_rate  = 16000
-        audio_data   = []
-
-        def _audio_cb(indata, frames, t, status):
-            audio_data.append(indata.copy())
-
-        threading.Thread(target=_setup_click_hook, daemon=True).start()
-
-        with sd.InputStream(callback=_audio_cb, channels=1,
-                            samplerate=sample_rate, blocksize=1024):
-            t0 = time.time()
-            while not _stop_recording.is_set():
-                if (time.time() - t0) >= 300:   # max 5 min for dictation
-                    break
-                time.sleep(0.05)
-
-        if not audio_data:
+        audio = session.record()
+        if audio is None:
             _pipe_show_error("Нет аудио — ничего не записано")
             return
 
-        audio = np.concatenate(audio_data, axis=0).flatten()
+        err = session.validate(audio)
+        if err:
+            _pipe_show_error(err)
+            return
 
         # ── Stage 1: transcribe ──
         _pipe_set_status("Загрузка модели…")
@@ -147,16 +138,16 @@ def _start_dictation():
         _pipe_show_error(f"Dictation error: {str(e)[:60]}")
     finally:
         _is_dictating = False
-        _stop_recording.clear()
+        session.__exit__(None, None, None)
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def on_hotkey_dictation():
     """Toggle dictation recording."""
-    global _is_dictating
-    if _is_dictating:
-        _stop_recording.set()
+    from services.ai.recorder import is_recording, stop_active
+    if is_recording():
+        stop_active()
         return
 
     from services.ai.whisper import _check_prerequisites, _all_required_ok, _show_prereq_dialog

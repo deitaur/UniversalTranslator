@@ -103,9 +103,12 @@ def send_ctrl_c():
     time.sleep(0.25)          # wait for clipboard to be written
 
 
-def send_ctrl_v():
-    """Paste from clipboard via SendInput."""
-    _wait_for_modifiers_release()
+def send_ctrl_v(skip_wait: bool = False):
+    """Paste from clipboard via SendInput.
+    skip_wait=True skips modifier-release wait (safe when called after a long operation
+    like a translation API call, since keys are definitely released by then)."""
+    if not skip_wait:
+        _wait_for_modifiers_release()
     time.sleep(0.05)
     _send_combo(0x11, 0x56)   # Ctrl+V
     time.sleep(0.15)

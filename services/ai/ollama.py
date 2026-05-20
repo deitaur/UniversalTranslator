@@ -75,7 +75,8 @@ def _get_system_prompt(mode="negotiator"):
 
 
 _FALLBACK_CHAT   = "qwen2.5:14b"
-_FALLBACK_POLISH = "gemma4:26b"
+_FALLBACK_FORMAT = "qwen2.5:14b"   # full editorial reformat — needs strong instruction-following
+_FALLBACK_POLISH = "gemma4:26b"    # minimal polish — short, simple task
 
 _ps_cache:    list  = []
 _ps_cache_ts: float = 0.0
@@ -110,14 +111,15 @@ def get_ollama_model() -> str:
     return running[0] if running else (config.get("ollama_model") or _FALLBACK_CHAT)
 
 
-def get_polish_model() -> str:
+def get_polish_model(format_mode: bool = False) -> str:
     """Model for voice-polish / text formatting.
-    Priority: config override → first running model → fallback."""
-    override = config.get("ollama_model_polish", "").strip()
-    if override:
-        return override
-    running = _running_models()
-    return running[0] if running else _FALLBACK_POLISH
+    format_mode=True  → full editorial reformat (qwen2.5:14b by default)
+    format_mode=False → minimal polish (gemma4:26b by default)
+    Priority: matching config override → matching fallback.
+    Does NOT steal the chat model."""
+    if format_mode:
+        return config.get("ollama_model_format", "").strip() or _FALLBACK_FORMAT
+    return config.get("ollama_model_polish", "").strip() or _FALLBACK_POLISH
 
 
 def unload_other_models():
