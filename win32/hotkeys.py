@@ -20,7 +20,6 @@ HOTKEY_NEGOTIATOR = 5
 HOTKEY_WEBSEARCH = 6
 HOTKEY_DICTATION  = 7
 HOTKEY_VOICECHAT  = 8
-HOTKEY_POLISH     = 9
 
 WM_HOTKEY = 0x0312
 
@@ -47,7 +46,6 @@ DEFAULT_HOTKEYS = {
     "web_search": "Ctrl+Alt+S",
     "dictation":  "Ctrl+Alt+D",
     "voicechat":  "Ctrl+Alt+V",
-    "polish":     "Ctrl+Alt+F",
 }
 
 user32 = ctypes.windll.user32

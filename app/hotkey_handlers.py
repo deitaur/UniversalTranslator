@@ -6,11 +6,11 @@ must not block the listener for more than a few ms.
 """
 
 import logging
+import threading
 
 import globals as g
 from app.translation import grab_selected_text, translate_auto, translate_text
 from services.ai.dictation import on_hotkey_dictation
-from services.ai.polish import on_hotkey_polish
 from services.ai.voice_chat import on_hotkey_voicechat
 from services.ai.whisper import on_tray_whisper
 from ui.chat_window import show_chat_window
@@ -32,10 +32,48 @@ def _flash(text: str):
 
 # ── Translation hotkeys ───────────────────────────────────────────────────────
 
+def _replace_worker(text: str, hud):
+    """Network + paste work. Runs on a worker thread so the hotkey listener
+    stays free and a wedged socket can't block other hotkeys."""
+    done = threading.Event()
+
+    def _watchdog():
+        # Hard upper bound — if translate_auto somehow blocks past the
+        # underlying request timeout, surface an error instead of leaving
+        # the HUD stuck on "translating…" forever.
+        if not done.wait(25) and hud:
+            hud.show_error("timed out")
+    threading.Thread(target=_watchdog, daemon=True).start()
+
+    try:
+        translated, _ = translate_auto(text)
+        if not translated:
+            log.warning("Translation returned empty")
+            if hud:
+                hud.show_error("translation failed")
+            return
+        if hud:
+            hud.set_status("pasting…")
+        set_clipboard_text(translated)
+        log.debug("Translation set to clipboard (%d chars)", len(translated))
+        send_ctrl_v(skip_wait=True)
+        if hud:
+            hud.show_result(translated[:80])
+        else:
+            show_toast("✓", 800)
+    except Exception as e:
+        log.error("Replace worker error: %s", e, exc_info=True)
+        if hud:
+            hud.show_error(f"error: {e}")
+    finally:
+        done.set()
+
+
 def on_hotkey_replace():
     log.debug("on_hotkey_replace called")
 
-    # Grab selection BEFORE opening HUD — window creation can steal focus
+    # Grab selection BEFORE opening HUD — window creation can steal focus.
+    # Must stay on the listener thread: Ctrl+C needs modifier-release timing.
     text = grab_selected_text()
     if not text.strip():
         log.debug("No text selected, skipping")
@@ -50,24 +88,16 @@ def on_hotkey_replace():
         hud.open_at_cursor()
         hud.set_status("translating…")
 
-    translated, _ = translate_auto(text)
-    if not translated:
-        log.warning("Translation returned empty")
-        if hud:
-            hud.show_error("translation failed")
-        return
+    threading.Thread(target=_replace_worker, args=(text, hud), daemon=True).start()
 
-    if hud:
-        hud.set_status("pasting…")
 
-    set_clipboard_text(translated)
-    log.debug("Translation set to clipboard (%d chars)", len(translated))
-    send_ctrl_v(skip_wait=True)
-
-    if hud:
-        hud.show_result(translated[:80])
-    else:
-        show_toast("✓", 800)
+def _popup_worker(text: str):
+    try:
+        translated, target_lang = translate_auto(text)
+        if translated:
+            show_translation_popup(text, translated, g.current_engine, target_lang)
+    except Exception as e:
+        log.error("Popup worker error: %s", e, exc_info=True)
 
 
 def on_hotkey_popup():
@@ -75,9 +105,7 @@ def on_hotkey_popup():
     text = grab_selected_text()
     if not text.strip():
         return
-    translated, target_lang = translate_auto(text)
-    if translated:
-        show_translation_popup(text, translated, g.current_engine, target_lang)
+    threading.Thread(target=_popup_worker, args=(text,), daemon=True).start()
 
 
 def on_hotkey_clipboard():
@@ -123,8 +151,3 @@ def on_hotkey_websearch():
 def on_hotkey_voicechat_handler():
     _flash("voice chat  Ctrl+Alt+V")
     on_hotkey_voicechat()
-
-
-def on_hotkey_polish_handler():
-    _flash("voice polish  Ctrl+Alt+F")
-    on_hotkey_polish()

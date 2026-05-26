@@ -13,7 +13,7 @@ class GoogleEngine:
     def translate(self, text):
         """Translate text using Google Translate."""
         params = {"client": "gtx", "sl": get_source_lang(), "tl": "en", "dt": "t", "q": text}
-        r = requests.get(GOOGLE_TL_URL, params=params, timeout=30,
+        r = requests.get(GOOGLE_TL_URL, params=params, timeout=(4, 20),
                          headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         data = r.json()
@@ -27,7 +27,7 @@ class GoogleEngine:
     def translate_reverse(self, text):
         """Translate English text back to target language."""
         params = {"client": "gtx", "sl": "en", "tl": get_target_lang(), "dt": "t", "q": text}
-        r = requests.get(GOOGLE_TL_URL, params=params, timeout=30,
+        r = requests.get(GOOGLE_TL_URL, params=params, timeout=(4, 20),
                          headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         data = r.json()
@@ -42,7 +42,7 @@ class GoogleEngine:
         """Translate text to any target language; source is auto-detected."""
         params = {"client": "gtx", "sl": "auto", "tl": target_lang_code,
                   "dt": "t", "q": text}
-        r = requests.get(GOOGLE_TL_URL, params=params, timeout=30,
+        r = requests.get(GOOGLE_TL_URL, params=params, timeout=(4, 20),
                          headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         data = r.json()

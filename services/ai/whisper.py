@@ -5,10 +5,17 @@ Status is shown in a Qt HUD overlay (ui.hud.PipeHud).
 
 import ctypes
 import ctypes.wintypes
+import logging
 import threading
+import time
 from pathlib import Path
+
+from config import config, save_config_full
 from win32.clipboard import set_clipboard_text
+from win32.keyboard import restore_foreground, send_ctrl_v
 import globals as g
+
+log = logging.getLogger("whisper")
 
 _is_recording   = False
 _stop_recording = threading.Event()
@@ -185,9 +192,69 @@ def _setup_click_hook():
 
 # ── Main recording pipeline ────────────────────────────────────────────────────
 
-def _start_recording():
+def _is_own_window(hwnd: int) -> bool:
+    """True if `hwnd` belongs to this Python process (so we shouldn't paste into it)."""
+    if not hwnd:
+        return True
+    pid = ctypes.wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value == ctypes.windll.kernel32.GetCurrentProcessId()
+
+
+def _resolve_actions(raw_text: str) -> "dict | None":
+    """Decide which actions to apply. Returns dict {shape, translate} or None on cancel.
+
+    If the user previously checked 'Запомнить выбор', skip the dialog and use
+    the saved choice. Otherwise show the dialog and wait."""
+    from ui.voice_actions_dialog import ask_voice_actions, SHAPE_NONE
+
+    show_dialog = config.get("voice_show_dialog", True)
+    if not show_dialog:
+        return {
+            "shape":     config.get("voice_action_shape", SHAPE_NONE),
+            "translate": bool(config.get("voice_action_translate", False)),
+        }
+    result = ask_voice_actions(raw_text)
+    return result  # may be None on Cancel
+
+
+def _apply_actions(raw_text: str, detected_lang: str, shape: str, translate: bool) -> str:
+    """Run the chosen pipeline. Shape runs first (cleanup/format), translate last."""
+    from services.ai.voice_actions import (
+        apply_spelling, apply_deep_edit, apply_tasks, apply_translate,
+    )
+    from ui.voice_actions_dialog import SHAPE_SPELLING, SHAPE_DEEP, SHAPE_TASKS
+
+    text = raw_text
+    if shape == SHAPE_SPELLING:
+        text = apply_spelling(text, detected_lang, _pipe_set_status)
+    elif shape == SHAPE_DEEP:
+        text = apply_deep_edit(text, _pipe_set_status)
+    elif shape == SHAPE_TASKS:
+        text = apply_tasks(text, _pipe_set_status)
+
+    if translate:
+        text = apply_translate(text, _pipe_set_status)
+
+    return text
+
+
+def _paste_into(hwnd: int, text: str) -> bool:
+    """Restore foreground to `hwnd` and paste via Ctrl+V. Returns True if pasted."""
+    set_clipboard_text(text)
+    if _is_own_window(hwnd):
+        # Triggered from tray (or no target captured) — leave in clipboard only.
+        return False
+    restore_foreground(hwnd)
+    time.sleep(0.12)
+    send_ctrl_v(skip_wait=True)
+    return True
+
+
+def _start_recording(target_hwnd: int = 0):
     global _is_recording
     from services.ai.recorder import AudioSession, start_click_hook
+    from services.ai.voice_actions import is_hallucination
 
     session = AudioSession(max_seconds=120)
     try:
@@ -212,7 +279,7 @@ def _start_recording():
             _pipe_show_error(err)
             return
 
-        # ── Stage 1: load / transcribe ──
+        # ── Stage 1: transcribe ──
         _pipe_set_status("Загрузка модели…")
         try:
             model = _load_whisper_model()
@@ -233,38 +300,38 @@ def _start_recording():
             _pipe_show_error(f"Ошибка транскрипции: {str(e)[:55]}")
             return
 
-        if not transcription:
-            _pipe_show_error("Речь не обнаружена")
+        if not transcription or is_hallucination(transcription):
+            _pipe_show_error("Речь не распознана — говорите чётче или выберите другой микрофон")
             return
 
-        # ── Stage 2: spell check ──
-        if detected_lang == "ru":
-            _pipe_set_status("Проверка орфографии…")
-            corrected = _fix_russian_spelling(transcription)
-        else:
-            corrected = transcription
+        # ── Stage 2: ask user what to do (or use saved choice) ──
+        _pipe_set_status("Жду выбор действия…")
+        choice = _resolve_actions(transcription)
+        if choice is None:
+            log.debug("User cancelled voice-actions dialog")
+            _pipe_show_error("отменено")
+            return
 
-        # ── Stage 3: translate ──
-        _pipe_set_status("Перевод…")
+        # ── Stage 3: apply chosen pipeline ──
         try:
-            if g.current_engine == "google":
-                from services.translators.google import GoogleEngine
-                engine = GoogleEngine()
-            elif g.current_engine == "yandex":
-                from services.translators.yandex import YandexEngine
-                engine = YandexEngine()
-            else:
-                from services.translators.deepl import DeepLEngine
-                engine = DeepLEngine()
-            translated = engine.translate(corrected)
+            processed = _apply_actions(
+                transcription, detected_lang, choice["shape"], choice["translate"],
+            )
         except Exception as e:
-            _pipe_show_error(f"Ошибка перевода: {str(e)[:55]}")
+            log.error("Action pipeline failed: %s", e, exc_info=True)
+            _pipe_show_error(f"Ошибка обработки: {str(e)[:55]}")
             return
 
-        set_clipboard_text(translated)
-        _pipe_show_result(translated)
+        # ── Stage 4: paste ──
+        _pipe_set_status("Вставляю…")
+        pasted = _paste_into(target_hwnd, processed)
+
+        preview = processed[:100] + ("…" if len(processed) > 100 else "")
+        label = "✓ вставлено" if pasted else "✓ в буфере"
+        _get_hud().show_result(preview, label)
 
     except Exception as e:
+        log.error("Whisper pipeline error: %s", e, exc_info=True)
         _pipe_show_error(f"Whisper error: {str(e)[:60]}")
     finally:
         _is_recording = False
@@ -281,10 +348,23 @@ def on_tray_whisper():
         stop_active()
         return
 
+    # Capture target foreground window NOW — by the time the user finishes
+    # talking, focus may have moved (HUD, dialog). We paste back into the
+    # window that was active when the hotkey was pressed.
+    target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+
     checks = _check_prerequisites()
 
+    def _spawn():
+        threading.Thread(target=_start_recording, args=(target_hwnd,), daemon=True).start()
+
     if _all_required_ok(checks):
-        threading.Thread(target=_start_recording, daemon=True).start()
+        _spawn()
     else:
-        _show_prereq_dialog(checks,
-            on_proceed=lambda: threading.Thread(target=_start_recording, daemon=True).start())
+        _show_prereq_dialog(checks, on_proceed=_spawn)
+
+
+def reset_voice_dialog_preference():
+    """Clear the 'remembered choice' so the dialog shows again next time."""
+    config["voice_show_dialog"] = True
+    save_config_full()

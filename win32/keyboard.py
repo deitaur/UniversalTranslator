@@ -103,6 +103,29 @@ def send_ctrl_c():
     time.sleep(0.25)          # wait for clipboard to be written
 
 
+def get_foreground_hwnd() -> int:
+    """Return the current foreground window handle (HWND as int)."""
+    return user32.GetForegroundWindow()
+
+
+def restore_foreground(hwnd: int) -> bool:
+    """Bring `hwnd` back to the foreground.
+
+    Windows blocks SetForegroundWindow from non-foreground processes; the
+    documented workaround is to press a key first (the OS treats that as
+    user activity and grants our process foreground rights for one call).
+    Returns True on success."""
+    if not hwnd:
+        return False
+    try:
+        # Tap Alt to gain SetForegroundWindow privilege for the next call.
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0)
+        return bool(user32.SetForegroundWindow(hwnd))
+    except Exception:
+        return False
+
+
 def send_ctrl_v(skip_wait: bool = False):
     """Paste from clipboard via SendInput.
     skip_wait=True skips modifier-release wait (safe when called after a long operation

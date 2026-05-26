@@ -225,6 +225,15 @@ def _build_qt_menu(callbacks: dict) -> QMenu:
     a.triggered.connect(callbacks["whisper"])
     menu.addAction(a)
 
+    show_dlg = QAction("  ↳ показывать диалог обработки", menu)
+    show_dlg.setCheckable(True)
+    show_dlg.setChecked(bool(config.get("voice_show_dialog", True)))
+    def _toggle_dlg(checked):
+        config["voice_show_dialog"] = bool(checked)
+        save_config_full()
+    show_dlg.toggled.connect(_toggle_dlg)
+    menu.addAction(show_dlg)
+
     try:
         from storage.roles import load_roles
         roles = load_roles()

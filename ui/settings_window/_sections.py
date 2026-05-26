@@ -180,7 +180,8 @@ def build_ai_ollama_section(win, lo):
         mono=True,
     )
     win._ollama_polish_entry.setToolTip(
-        "Model for voice-polish (Ctrl+Alt+F) text editing.\n"
+        "Model for the voice-dictation editing actions (Ctrl+Alt+W).\n"
+        "Used by 'Глубокая редактура' and 'Оформить как список дел'.\n"
         "Leave blank to auto-use whatever is loaded in Ollama RAM.\n"
         "Recommended: gemma4:26b  (best writing quality)"
     )
@@ -283,7 +284,7 @@ def build_dictation_section(win, lo):
 def build_polish_section(win, lo):
     from services.ai.ollama import get_polish_model
 
-    s = _Section("Voice Polish  (Ctrl+Alt+F)")
+    s = _Section("Voice editing  (Ctrl+Alt+W)")
     lo.addWidget(s)
     win._format_cb = QCheckBox("AI format output  (structure text like a professional editor)")
     win._format_cb.setFont(_F_LABEL)

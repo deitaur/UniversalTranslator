@@ -42,7 +42,7 @@ from app.tray_actions import (
     usage_refresh_loop,
 )
 from app.hotkey_handlers import (
-    on_hotkey_clipboard, on_hotkey_polish_handler, on_hotkey_popup,
+    on_hotkey_clipboard, on_hotkey_popup,
     on_hotkey_replace, on_hotkey_whisper, on_hotkey_negotiator,
     on_hotkey_websearch, on_hotkey_voicechat_handler,
 )
@@ -51,6 +51,7 @@ from services.ai.whisper import on_tray_whisper
 from ui.chat_window import setup_chat
 from ui.notifications import setup_notifications
 from ui.popup_window import setup_popup
+from ui.voice_actions_dialog import setup_voice_actions_dialog
 from ui.voice_chat_dialog import show_voice_chat_dialog
 
 log.info("All imports OK")
@@ -101,10 +102,11 @@ def main():
         app = QApplication.instance() or QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
 
-        setup_notifications()   # toast manager must live on the Qt main thread
-        setup_popup()           # translation popup controller
-        setup_chat()            # chat window controller
-        setup_vc_hud()          # voice chat HUD
+        setup_notifications()         # toast manager must live on the Qt main thread
+        setup_popup()                 # translation popup controller
+        setup_chat()                  # chat window controller
+        setup_vc_hud()                # voice chat HUD
+        setup_voice_actions_dialog()  # post-Whisper action dialog controller
 
         # Pipe HUD — init here so Ctrl+Alt+R works even without prior whisper use
         from ui.hud import init_pipe_hud
@@ -118,7 +120,6 @@ def main():
             ("R",  "repl",   "Replace in-place",      "Ctrl+Alt+R", on_hotkey_replace),
             ("C",  "clip",   "Translate clipboard",   "Ctrl+Alt+Y", on_hotkey_clipboard),
             ("🎙", "stt",    "Voice → text",           "Ctrl+Alt+W", on_hotkey_whisper),
-            ("✨", "polish", "Voice polish → paste",   "Ctrl+Alt+F", on_hotkey_polish_handler),
             ("N",  "nego",   "Negotiator chat",        "Ctrl+Alt+N", on_hotkey_negotiator),
             ("W",  "web",    "Web search",             "Ctrl+Alt+S", on_hotkey_websearch),
             ("📞", "vc",     "Voice chat dialog",      "Ctrl+Alt+V", on_hotkey_voicechat_handler),
