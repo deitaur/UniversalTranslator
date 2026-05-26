@@ -14,6 +14,15 @@ from PySide6.QtWidgets import (
 from config import APP_NAME, ICON_FILE, C, config
 from ui.chat_window import _Bubble
 
+class _RoleComboBox(QComboBox):
+    def __init__(self, refresh_callback):
+        super().__init__()
+        self._refresh_callback = refresh_callback
+
+    def showPopup(self):
+        self._refresh_callback()
+        super().showPopup()
+
 # VAD tuning
 _SILENCE_RMS = 0.012
 _SILENCE_SEC = 1.5
@@ -127,9 +136,7 @@ class VoiceChatDialog(QWidget):
         hdr_lo.setContentsMargins(8, 4, 8, 4)
         hdr_lo.setSpacing(6)
 
-        from storage.roles import load_roles
-        roles = load_roles()
-        self._role_combo = QComboBox()
+        self._role_combo = _RoleComboBox(self._refresh_roles)
         self._role_combo.setFont(QFont("Segoe UI Semibold", 10))
         self._role_combo.setStyleSheet(
             f"QComboBox {{ background:{C['card_alt']}; color:{C['text']};"
@@ -138,9 +145,21 @@ class VoiceChatDialog(QWidget):
             f"QComboBox QAbstractItemView {{ background:{C['card']}; color:{C['text']}; }}"
         )
         self._role_combo.setFixedWidth(170)
-        for rid, role in roles.items():
-            self._role_combo.addItem(role.get("name", rid), rid)
+        self._refresh_roles()
         hdr_lo.addWidget(self._role_combo)
+
+        edit_role_btn = QPushButton("✎")
+        edit_role_btn.setFixedSize(24, 24)
+        edit_role_btn.setFont(QFont("Segoe UI", 11))
+        edit_role_btn.setStyleSheet(
+            f"QPushButton {{ color:{C['text']}; background:{C['card_alt']}; border:1px solid {C['border']}; border-radius:5px; }}"
+            f"QPushButton:hover {{ background:{C['border']}; }}"
+        )
+        def _open_role_editor():
+            from ui.role_editor import show_role_editor
+            show_role_editor()
+        edit_role_btn.clicked.connect(_open_role_editor)
+        hdr_lo.addWidget(edit_role_btn)
 
         from services.ai.ollama import get_ollama_model as _gom
         self._model_lbl = QLabel(_gom())
@@ -336,6 +355,22 @@ class VoiceChatDialog(QWidget):
         label = role.get("name", rid) if role else rid
         color = role.get("color", C["mauve"]) if role else C["mauve"]
         return label, color
+
+    def _refresh_roles(self):
+        from storage.roles import load_roles
+        rid_selected = self._current_role_id()
+        roles = load_roles()
+        self._role_combo.blockSignals(True)
+        self._role_combo.clear()
+        idx_to_select = 0
+        i = 0
+        for rid, role_data in roles.items():
+            self._role_combo.addItem(role_data.get("name", rid), rid)
+            if rid == rid_selected:
+                idx_to_select = i
+            i += 1
+        self._role_combo.setCurrentIndex(idx_to_select)
+        self._role_combo.blockSignals(False)
 
     def _add_bubble(self, role: str, text: str) -> _Bubble:
         label, color = self._get_role_info()

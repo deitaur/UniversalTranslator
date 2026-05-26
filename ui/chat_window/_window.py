@@ -13,6 +13,15 @@ from PySide6.QtWidgets import (
 
 from config import APP_NAME, ICON_FILE, C, config, save_config_full
 
+class _RoleComboBox(QComboBox):
+    def __init__(self, refresh_callback):
+        super().__init__()
+        self._refresh_callback = refresh_callback
+
+    def showPopup(self):
+        self._refresh_callback()
+        super().showPopup()
+
 from ui.chat_window._bubble import _Bubble
 
 FONT_FAMILIES = ["Segoe UI", "Verdana", "Cascadia Code"]
@@ -105,12 +114,7 @@ class ChatWindow(QWidget):
         hdr_lo.setContentsMargins(10, 8, 6, 8)
         hdr_lo.setSpacing(4)
 
-        from storage.roles import load_roles
-        roles = load_roles()
-        role_ids   = list(roles.keys())
-        role_names = {rid: roles[rid].get("name", rid) for rid in role_ids}
-
-        self._role_combo = QComboBox()
+        self._role_combo = _RoleComboBox(self._refresh_roles)
         self._role_combo.setFont(QFont("Segoe UI Semibold", 11))
         self._role_combo.setStyleSheet(
             f"QComboBox {{ background:{C['card_alt']}; color:{C['text']};"
@@ -118,14 +122,22 @@ class ChatWindow(QWidget):
             f"QComboBox::drop-down {{ border:none; }}"
         )
         self._role_combo.setFixedWidth(140)
-        for rid in role_ids:
-            self._role_combo.addItem(role_names[rid], rid)
-        # select current mode
-        idx = next((i for i in range(self._role_combo.count())
-                    if self._role_combo.itemData(i) == self._mode), 0)
-        self._role_combo.setCurrentIndex(idx)
+        self._refresh_roles()
         self._role_combo.currentIndexChanged.connect(self._on_role_change)
         hdr_lo.addWidget(self._role_combo)
+
+        edit_role_btn = QPushButton("✎")
+        edit_role_btn.setFixedSize(26, 26)
+        edit_role_btn.setFont(QFont("Segoe UI", 12))
+        edit_role_btn.setStyleSheet(
+            f"QPushButton {{ color:{C['text']}; background:{C['card_alt']}; border:1px solid {C['border']}; border-radius:5px; }}"
+            f"QPushButton:hover {{ background:{C['border']}; }}"
+        )
+        def _open_role_editor():
+            from ui.role_editor import show_role_editor
+            show_role_editor()
+        edit_role_btn.clicked.connect(_open_role_editor)
+        hdr_lo.addWidget(edit_role_btn)
 
         model_lbl = QLabel("…")
         model_lbl.setFont(QFont("Segoe UI", 9))
@@ -407,6 +419,21 @@ class ChatWindow(QWidget):
         if rid and rid != self._mode:
             self._mode = rid
             self._update_title()
+
+    def _refresh_roles(self):
+        from storage.roles import load_roles
+        roles = load_roles()
+        self._role_combo.blockSignals(True)
+        self._role_combo.clear()
+        idx_to_select = 0
+        i = 0
+        for rid, role_data in roles.items():
+            self._role_combo.addItem(role_data.get("name", rid), rid)
+            if rid == self._mode:
+                idx_to_select = i
+            i += 1
+        self._role_combo.setCurrentIndex(idx_to_select)
+        self._role_combo.blockSignals(False)
 
     def _update_title(self):
         from storage.roles import get_role
