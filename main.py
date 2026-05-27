@@ -149,10 +149,17 @@ def main():
 
         # Proper cleanup on app exit
         def _on_app_quit():
-            log.info("App quit: cleaning up...")
+            log.info("App quit: cleaning up resources...")
+            # Signal all threads to stop (hotkey listener, usage refresh, bridge, etc.)
+            from globals import stop_event
+            stop_event.set()
+            # Save critical state
             shelf_ctrl.save_timers()
             from app.hotkey_loop import unregister_all_hotkeys
             unregister_all_hotkeys()
+            # Brief pause for threads to exit gracefully
+            import time
+            time.sleep(0.1)
             log.info("Cleanup complete")
 
         app.aboutToQuit.connect(_on_app_quit)
