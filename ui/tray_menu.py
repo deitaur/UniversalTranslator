@@ -196,60 +196,14 @@ def create_desktop_shortcut():
 def _build_qt_menu(callbacks: dict) -> QMenu:
     menu = QMenu()
 
-    a = QAction("Translate Clipboard", menu)
-    a.triggered.connect(callbacks["translate_clipboard"])
+    a = QAction("🎙  Voice to Text  (Ctrl+Alt+W)", menu)
+    a.triggered.connect(callbacks["whisper"])
     menu.addAction(a)
     menu.setDefaultAction(a)
 
     menu.addSeparator()
 
-    engine_menu = QMenu("Engine", menu)
-    ag = QActionGroup(engine_menu)
-    ag.setExclusive(True)
-    for ev, el in [("deepl", "DeepL"), ("google", "Google (free)"), ("yandex", "Yandex (free)")]:
-        a = QAction(el, engine_menu)
-        a.setCheckable(True)
-        a.setChecked(g.current_engine == ev)
-        a.triggered.connect(lambda checked=False, e=ev: _set_engine(e))
-        engine_menu.addAction(a)
-        ag.addAction(a)
-    menu.addMenu(engine_menu)
-
-    menu.addSeparator()
-
-    a = QAction("📞  Voice Chat", menu)
-    a.triggered.connect(callbacks["voice_chat_dialog"])
-    menu.addAction(a)
-
-    a = QAction("Voice to Text  (Ctrl+Alt+W)", menu)
-    a.triggered.connect(callbacks["whisper"])
-    menu.addAction(a)
-
-    show_dlg = QAction("  ↳ показывать диалог обработки", menu)
-    show_dlg.setCheckable(True)
-    show_dlg.setChecked(bool(config.get("voice_show_dialog", True)))
-    def _toggle_dlg(checked):
-        config["voice_show_dialog"] = bool(checked)
-        save_config_full()
-    show_dlg.toggled.connect(_toggle_dlg)
-    menu.addAction(show_dlg)
-
-    try:
-        from storage.roles import load_roles
-        roles = load_roles()
-        hotkey_hints = {"negotiator": "  (Ctrl+Alt+N)", "web_search": "  (Ctrl+Alt+S)"}
-        for rid, role in roles.items():
-            if role.get("show_in_tray", True):
-                label = role.get("name", rid) + hotkey_hints.get(rid, "")
-                a = QAction(label, menu)
-                a.triggered.connect(lambda checked=False, r=rid: callbacks["role_chat"](r))
-                menu.addAction(a)
-    except Exception:
-        pass
-
-    menu.addSeparator()
-
-    a = QAction("Settings", menu)
+    a = QAction("⚙  Settings", menu)
     a.triggered.connect(callbacks["settings"])
     menu.addAction(a)
 

@@ -1,8 +1,8 @@
 """
-Universal Translator — main entry point.
+Универсальный переводчик — основная точка входа.
 
-Wires the tray icon, hotkey listener, Qt event loop, and HUD overlays.
-The actual hotkey/tray logic lives in the `app` package.
+Подключает значок на панели задач, прослушиватель горячих клавиш, цикл событий Qt и наложения HUD.
+Фактическая логика горячих клавиш/трея находится в пакете app.
 """
 
 import logging
@@ -116,14 +116,8 @@ def main():
         # ── Tool shelf (ZBrush-style icon strip) ──
         from ui.tool_shelf import init_tool_shelf, show_tool_shelf
         _shelf_tools = [
-            ("T",  "trnsl",  "Translation popup",     "Ctrl+Alt+T", on_hotkey_popup),
-            ("R",  "repl",   "Replace in-place",      "Ctrl+Alt+R", on_hotkey_replace),
-            ("C",  "clip",   "Translate clipboard",   "Ctrl+Alt+Y", on_hotkey_clipboard),
-            ("🎙", "stt",    "Voice → text",           "Ctrl+Alt+W", on_hotkey_whisper),
-            ("N",  "nego",   "Negotiator chat",        "Ctrl+Alt+N", on_hotkey_negotiator),
-            ("W",  "web",    "Web search",             "Ctrl+Alt+S", on_hotkey_websearch),
-            ("📞", "vc",     "Voice chat dialog",      "Ctrl+Alt+V", on_hotkey_voicechat_handler),
-            ("⚙",  "set",    "Settings",               "",           on_tray_settings),
+            ("🎙", "stt",    "Voice → text (диктофон)",  "Ctrl+Alt+W", on_hotkey_whisper),
+            ("⚙",  "set",    "Settings",                  "",           on_tray_settings),
         ]
         init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
         show_tool_shelf()   # appear at startup above taskbar; ✕ quits, _ hides, ● pins
