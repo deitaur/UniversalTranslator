@@ -22,6 +22,7 @@ _stop_recording = threading.Event()
 _whisper_model  = None
 _spell_model    = None
 _spell_tokenizer = None
+_processing_lock = threading.Lock()  # Serialize voice pipeline (record → transcribe → process → paste)
 
 WHISPER_MODEL_ID = "deepdml/faster-whisper-large-v3-turbo-ct2"
 SPELL_MODEL_ID   = "ai-forever/sage-fredt5-distilled-95m"
@@ -256,92 +257,101 @@ def _start_recording(target_hwnd: int = 0):
     from services.ai.recorder import AudioSession, start_click_hook
     from services.ai.voice_actions import is_hallucination
 
-    session = AudioSession(max_seconds=120)
-    try:
-        session.__enter__()
-    except RuntimeError:
-        _pipe_show_error("Другой модуль уже записывает звук")
+    # Acquire lock to serialize the entire pipeline (record → transcribe → process → paste)
+    if not _processing_lock.acquire(blocking=False):
+        from ui.notifications import show_toast
+        show_toast("⏳ Подождите, идет обработка голоса…")
         return
 
-    _is_recording = True
-    _open_pipe_window()
-
     try:
-        start_click_hook(session.stop_event)
-
-        audio = session.record()
-        if audio is None:
-            _pipe_show_error("Нет аудио — ничего не записано")
-            return
-
-        err = session.validate(audio)
-        if err:
-            _pipe_show_error(err)
-            return
-
-        # ── Stage 1: transcribe ──
-        _pipe_set_status("Загрузка модели…")
+        session = AudioSession(max_seconds=120)
         try:
-            model = _load_whisper_model()
-        except Exception as e:
-            _pipe_show_error(f"Ошибка загрузки модели: {str(e)[:55]}")
+            session.__enter__()
+        except RuntimeError:
+            _pipe_show_error("Другой модуль уже записывает звук")
             return
 
-        from utils.language import get_source_lang
-        src_lang     = get_source_lang()
-        whisper_lang = None if src_lang == "en" else src_lang
+        _is_recording = True
+        _open_pipe_window()
 
-        _pipe_set_status(f"Распознавание речи ({src_lang.upper()})…")
         try:
-            segments, info = model.transcribe(audio, language=whisper_lang, beam_size=5)
-            detected_lang  = getattr(info, "language", src_lang)
-            transcription  = " ".join(seg.text for seg in segments).strip()
+            start_click_hook(session.stop_event)
+
+            audio = session.record()
+            if audio is None:
+                _pipe_show_error("Нет аудио — ничего не записано")
+                return
+
+            err = session.validate(audio)
+            if err:
+                _pipe_show_error(err)
+                return
+
+            # ── Stage 1: transcribe ──
+            _pipe_set_status("Загрузка модели…")
+            try:
+                model = _load_whisper_model()
+            except Exception as e:
+                _pipe_show_error(f"Ошибка загрузки модели: {str(e)[:55]}")
+                return
+
+            from utils.language import get_source_lang
+            src_lang     = get_source_lang()
+            whisper_lang = None if src_lang == "en" else src_lang
+
+            _pipe_set_status(f"Распознавание речи ({src_lang.upper()})…")
+            try:
+                segments, info = model.transcribe(audio, language=whisper_lang, beam_size=5)
+                detected_lang  = getattr(info, "language", src_lang)
+                transcription  = " ".join(seg.text for seg in segments).strip()
+            except Exception as e:
+                _pipe_show_error(f"Ошибка транскрипции: {str(e)[:55]}")
+                return
+
+            if not transcription or is_hallucination(transcription):
+                _pipe_show_error("Речь не распознана — говорите чётче или выберите другой микрофон")
+                return
+
+            # ── Stage 2: ask user what to do (or use saved choice) ──
+            _pipe_set_status("Жду выбор действия…")
+            choice = _resolve_actions(transcription)
+            if choice is None:
+                log.debug("User cancelled voice-actions dialog")
+                _pipe_show_error("отменено")
+                return
+
+            # ── Stage 3: apply chosen pipeline ──
+            try:
+                processed = _apply_actions(
+                    transcription, detected_lang, choice["shape"], choice["translate"],
+                )
+            except Exception as e:
+                log.error("Action pipeline failed: %s", e, exc_info=True)
+                _pipe_show_error(f"Ошибка обработки: {str(e)[:55]}")
+                return
+
+            # ── Stage 4: paste & notify ──
+            _pipe_set_status("Вставляю…")
+            pasted = _paste_into(target_hwnd, processed)
+
+            # Play success sound + show toast for translation
+            if choice["translate"]:
+                from ui.notifications import play_success_sound, show_translation_toast
+                play_success_sound()
+                show_translation_toast(processed)
+
+            preview = processed[:100] + ("…" if len(processed) > 100 else "")
+            label = "✓ вставлено" if pasted else "✓ в буфере"
+            _get_hud().show_result(preview, label)
+
         except Exception as e:
-            _pipe_show_error(f"Ошибка транскрипции: {str(e)[:55]}")
-            return
-
-        if not transcription or is_hallucination(transcription):
-            _pipe_show_error("Речь не распознана — говорите чётче или выберите другой микрофон")
-            return
-
-        # ── Stage 2: ask user what to do (or use saved choice) ──
-        _pipe_set_status("Жду выбор действия…")
-        choice = _resolve_actions(transcription)
-        if choice is None:
-            log.debug("User cancelled voice-actions dialog")
-            _pipe_show_error("отменено")
-            return
-
-        # ── Stage 3: apply chosen pipeline ──
-        try:
-            processed = _apply_actions(
-                transcription, detected_lang, choice["shape"], choice["translate"],
-            )
-        except Exception as e:
-            log.error("Action pipeline failed: %s", e, exc_info=True)
-            _pipe_show_error(f"Ошибка обработки: {str(e)[:55]}")
-            return
-
-        # ── Stage 4: paste & notify ──
-        _pipe_set_status("Вставляю…")
-        pasted = _paste_into(target_hwnd, processed)
-
-        # Play success sound + show toast for translation
-        if choice["translate"]:
-            from ui.notifications import play_success_sound, show_translation_toast
-            play_success_sound()
-            show_translation_toast(processed)
-
-        preview = processed[:100] + ("…" if len(processed) > 100 else "")
-        label = "✓ вставлено" if pasted else "✓ в буфере"
-        _get_hud().show_result(preview, label)
-
-    except Exception as e:
-        log.error("Whisper pipeline error: %s", e, exc_info=True)
-        _pipe_show_error(f"Whisper error: {str(e)[:60]}")
+            log.error("Whisper pipeline error: %s", e, exc_info=True)
+            _pipe_show_error(f"Whisper error: {str(e)[:60]}")
+        finally:
+            _is_recording = False
+            session.__exit__(None, None, None)
     finally:
-        _is_recording = False
-        session.__exit__(None, None, None)
+        _processing_lock.release()
 
 
 # ── Public entry point ─────────────────────────────────────────────────────────
