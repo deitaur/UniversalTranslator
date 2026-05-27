@@ -33,26 +33,30 @@ logging.basicConfig(
 log = logging.getLogger("main")
 log.info("=== Universal Translator starting ===")
 
-# Imports that may indirectly pull in heavy modules (PySide6 widgets, Whisper…)
-# are kept *after* logging is set up so any import-time crash lands in app.log.
+# Core imports needed immediately
 from app.hotkey_loop import hotkey_listener
 from app.tray_actions import (
     manage_autostart_shortcut, on_tray_quit, on_tray_role_chat,
     on_tray_settings, on_tray_translate, switch_to_google_silently,
-    usage_refresh_loop,
 )
 from app.hotkey_handlers import (
     on_hotkey_clipboard, on_hotkey_popup,
-    on_hotkey_replace, on_hotkey_whisper, on_hotkey_negotiator,
-    on_hotkey_websearch, on_hotkey_voicechat_handler,
+    on_hotkey_replace, on_hotkey_negotiator,
+    on_hotkey_websearch,
 )
-from services.ai.voice_chat import setup_hud as setup_vc_hud
-from services.ai.whisper import on_tray_whisper
 from ui.chat_window import setup_chat
 from ui.notifications import setup_notifications
 from ui.popup_window import setup_popup
-from ui.voice_actions_dialog import setup_voice_actions_dialog
-from ui.voice_chat_dialog import show_voice_chat_dialog
+
+# Lazy imports — loaded on-demand:
+# - on_hotkey_whisper: loaded when whisper module needed
+# - on_tray_whisper: loaded when tray whisper needed
+# - setup_vc_hud: loaded when voice chat needed
+# - show_voice_chat_dialog: loaded when voice chat dialog needed
+# - setup_voice_actions_dialog: loaded when voice actions needed
+# - on_hotkey_voicechat_handler: loaded when voicechat hotkey needed
+# - on_hotkey_dictation_handler: loaded when dictation hotkey needed
+# - usage_refresh_loop: loaded only if using DeepL
 
 log.info("All imports OK")
 
@@ -86,9 +90,16 @@ def main():
             except Exception as e:
                 log.error("DeepL usage fetch failed: %s", e)
 
+        # Start hotkey listener (always needed)
         threading.Thread(target=hotkey_listener, daemon=True).start()
-        threading.Thread(target=usage_refresh_loop, daemon=True).start()
 
+        # Only start usage refresh if using DeepL (lazy load the module)
+        if g.current_engine == "deepl":
+            from app.tray_actions import usage_refresh_loop
+            threading.Thread(target=usage_refresh_loop, daemon=True).start()
+            log.info("DeepL usage refresh thread started")
+
+        # Only start bridge if explicitly enabled
         if config.get("bridge_enabled", False):
             from services.bridge.server import start_bridge
             threading.Thread(target=start_bridge, daemon=True).start()
@@ -105,13 +116,18 @@ def main():
         setup_notifications()         # toast manager must live on the Qt main thread
         setup_popup()                 # translation popup controller
         setup_chat()                  # chat window controller
-        setup_vc_hud()                # voice chat HUD
-        setup_voice_actions_dialog()  # post-Whisper action dialog controller
 
         # Pipe HUD — init here so Ctrl+Alt+R works even without prior whisper use
         from ui.hud import init_pipe_hud
-        from services.ai.recorder import stop_active as _stop_active
-        init_pipe_hud(_stop_active)
+        try:
+            from services.ai.recorder import stop_active as _stop_active
+            init_pipe_hud(_stop_active)
+        except Exception as e:
+            log.warning("Failed to init pipe HUD: %s", e)
+            init_pipe_hud(None)
+
+        # Voice chat and voice actions are lazy-loaded when first needed
+        # (in on_hotkey_voicechat_handler and on_hotkey_whisper)
 
         # ── Tool shelf (ZBrush-style icon strip) ──
         from ui.tool_shelf import init_tool_shelf, show_tool_shelf
@@ -122,17 +138,31 @@ def main():
         shelf_ctrl = init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
         show_tool_shelf()   # appear at startup above taskbar; ✕ quits, _ hides, ● pins
 
-        # Save timer state on app exit
+        # Create lazy-loaded callbacks for heavy features
+        def _on_tray_whisper_lazy():
+            from services.ai.whisper import on_tray_whisper
+            on_tray_whisper()
+
+        def _on_voice_chat_lazy():
+            from ui.voice_chat_dialog import show_voice_chat_dialog
+            show_voice_chat_dialog()
+
+        # Proper cleanup on app exit
         def _on_app_quit():
+            log.info("App quit: cleaning up...")
             shelf_ctrl.save_timers()
+            from app.hotkey_loop import unregister_all_hotkeys
+            unregister_all_hotkeys()
+            log.info("Cleanup complete")
+
         app.aboutToQuit.connect(_on_app_quit)
 
         create_tray_icon({
             "translate_clipboard": on_tray_translate,
             "settings":            on_tray_settings,
-            "whisper":             on_tray_whisper,
+            "whisper":             _on_tray_whisper_lazy,
             "role_chat":           on_tray_role_chat,
-            "voice_chat_dialog":   show_voice_chat_dialog,
+            "voice_chat_dialog":   _on_voice_chat_lazy,
             "tool_shelf":          show_tool_shelf,
             "quit":                on_tray_quit,
         })

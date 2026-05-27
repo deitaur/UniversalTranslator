@@ -11,14 +11,16 @@ import threading
 import globals as g
 from app.translation import grab_selected_text, translate_auto, translate_text
 from config import config
-from services.ai.dictation import on_hotkey_dictation
-from services.ai.voice_chat import on_hotkey_voicechat
-from services.ai.whisper import on_tray_whisper
 from ui.chat_window import show_chat_window
 from ui.notifications import show_toast
 from ui.popup_window import show_translation_popup
 from win32.clipboard import get_clipboard_text, set_clipboard_text
 from win32.keyboard import send_ctrl_v
+
+# Heavy modules are lazy-loaded on demand:
+# - services.ai.dictation (on_hotkey_dictation)
+# - services.ai.voice_chat (on_hotkey_voicechat)
+# - services.ai.whisper (on_tray_whisper)
 
 log = logging.getLogger("hotkeys")
 
@@ -157,6 +159,8 @@ def on_hotkey_clipboard():
 def on_hotkey_whisper():
     try:
         _flash("voice → text  Ctrl+Alt+W")
+        # Lazy load whisper module on first use
+        from services.ai.whisper import on_tray_whisper
         on_tray_whisper()
     except Exception as e:
         log.error("on_hotkey_whisper error: %s", e, exc_info=True)
@@ -165,6 +169,8 @@ def on_hotkey_whisper():
 def on_hotkey_dictation_handler():
     try:
         _flash("dictation  Ctrl+Alt+D")
+        # Lazy load dictation module on first use
+        from services.ai.dictation import on_hotkey_dictation
         on_hotkey_dictation()
     except Exception as e:
         log.error("on_hotkey_dictation_handler error: %s", e, exc_info=True)
@@ -196,6 +202,8 @@ def on_hotkey_websearch():
 def on_hotkey_voicechat_handler():
     try:
         _flash("voice chat  Ctrl+Alt+V")
+        # Lazy load voice chat module on first use
+        from services.ai.voice_chat import on_hotkey_voicechat
         on_hotkey_voicechat()
     except Exception as e:
         log.error("on_hotkey_voicechat_handler error: %s", e, exc_info=True)
