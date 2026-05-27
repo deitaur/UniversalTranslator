@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -35,7 +35,7 @@ class TimerWidget90(QWidget):
         self._time_lbl = QLabel("90:00")
         self._time_lbl.setFont(_FONT_TIME)
         self._time_lbl.setStyleSheet("color: #89b4fa; background: transparent;")
-        self._time_lbl.setAlignment(0x0004 | 0x0020)  # AlignHCenter | AlignVCenter
+        self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         lo.addWidget(self._time_lbl)
 
         # Control buttons
@@ -109,7 +109,7 @@ class TimerWidget20(QWidget):
 
         self.setFixedSize(60, 50)
         self.setStyleSheet("background: #2a2a2a; border: 1px solid #444; border-radius: 4px;")
-        self.setCursor(1)  # PointingHandCursor
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lo = QVBoxLayout(self)
         lo.setContentsMargins(4, 6, 4, 6)
@@ -119,7 +119,7 @@ class TimerWidget20(QWidget):
         self._time_lbl = QLabel("20:00")
         self._time_lbl.setFont(_FONT_TIME)
         self._time_lbl.setStyleSheet("color: #a6e3a1; background: transparent;")
-        self._time_lbl.setAlignment(0x0004 | 0x0020)
+        self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         lo.addWidget(self._time_lbl)
 
         self.mousePressEvent = self._on_click
