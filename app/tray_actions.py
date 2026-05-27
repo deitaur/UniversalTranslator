@@ -9,7 +9,6 @@ from PySide6.QtWidgets import QApplication
 import globals as g
 from config import config, save_config_full
 from globals import stop_event
-from services.translators.deepl import DeepLEngine
 from ui.chat_window import show_chat_window
 from ui.settings_window import show_settings_window
 from ui.tray_menu import rebuild_menu, update_tray_icon
@@ -17,19 +16,26 @@ from ui.tray_menu import rebuild_menu, update_tray_icon
 from app.hotkey_handlers import on_hotkey_clipboard
 from app.hotkey_loop import unregister_all_hotkeys
 
+# DeepLEngine is lazy-loaded in usage_refresh_loop()
+
 log = logging.getLogger("tray")
 
 
 # ── Background loops ──────────────────────────────────────────────────────────
 
 def usage_refresh_loop():
+    # Lazy load DeepL engine only when this background thread runs
     while not stop_event.is_set():
         if g.current_engine == "deepl":
-            engine = DeepLEngine()
-            count, limit = engine.get_usage()
-            g.usage_data["character_count"] = count
-            g.usage_data["character_limit"] = limit
-            update_tray_icon()
+            try:
+                from services.translators.deepl import DeepLEngine
+                engine = DeepLEngine()
+                count, limit = engine.get_usage()
+                g.usage_data["character_count"] = count
+                g.usage_data["character_limit"] = limit
+                update_tray_icon()
+            except Exception as e:
+                log.warning("Failed to refresh DeepL usage: %s", e)
         time.sleep(300)
 
 
