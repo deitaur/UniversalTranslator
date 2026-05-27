@@ -5,6 +5,8 @@ Single click = start/stop, double click = reset.
 
 import logging
 import threading
+from datetime import datetime
+from pathlib import Path
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
@@ -125,11 +127,43 @@ class TimerWidget20(_TimerBase):
 
 
 class TimerWidget90(_TimerBase):
-    """90-minute clickable timer."""
+    """90-minute clickable timer with deep work logging."""
 
     def __init__(self):
         super().__init__(90)
         self.setFixedSize(75, 50)
+
+    def _play_alert(self):
+        """Play alert and log deep work session."""
+        super()._play_alert()
+        self._log_session()
+
+    def _log_session(self):
+        """Log completed 90-min deep work session to markdown file."""
+        def _write_log():
+            try:
+                from config import CONFIG_DIR
+                log_file = CONFIG_DIR / "deep_work.md"
+
+                # Create file with header if it doesn't exist
+                if not log_file.exists():
+                    log_file.write_text("# Deep Work Sessions\n\n")
+
+                # Get current time and format
+                now = datetime.now()
+                end_time = now.strftime("%H:%M")
+                date = now.strftime("%Y-%m-%d")
+
+                # Append new entry
+                entry = f"- {date} | {end_time} | 90 min\n"
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(entry)
+
+                log.info(f"Deep work session logged: {date} {end_time}")
+            except Exception as e:
+                log.warning(f"Failed to log deep work session: {e}")
+
+        threading.Thread(target=_write_log, daemon=True).start()
 
 
 class TimerWidget240(_TimerBase):
