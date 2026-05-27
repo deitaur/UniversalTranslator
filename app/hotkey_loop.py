@@ -64,8 +64,17 @@ def unregister_all_hotkeys():
 
 
 def hotkey_listener():
+    from config import config
     user32 = ctypes.windll.user32
     log.info("Hotkey listener thread started")
+
+    # Skip hotkey registration in remote mode (AnyDesk compatibility)
+    if config.get("remote_session_mode", False):
+        log.info("Remote mode: hotkeys disabled to avoid AnyDesk conflicts")
+        while not stop_event.is_set():
+            time.sleep(0.1)
+        return
+
     try:
         _register_hotkeys()
     except Exception as e:
