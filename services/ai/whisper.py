@@ -242,7 +242,8 @@ def _apply_actions(raw_text: str, detected_lang: str, shape: str, translate: boo
 
 def _paste_into(hwnd: int, text: str) -> bool:
     """Restore foreground to `hwnd` and paste via Ctrl+V. Returns True if pasted."""
-    set_clipboard_text(text)
+    if not set_clipboard_text(text):
+        log.error("Failed to set clipboard (%d chars)", len(text))
     if _is_own_window(hwnd):
         # Triggered from tray (or no target captured) — leave in clipboard only.
         return False

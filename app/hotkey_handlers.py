@@ -55,7 +55,11 @@ def _replace_worker(text: str, hud):
             return
         if hud:
             hud.set_status("pasting…")
-        set_clipboard_text(translated)
+        if not set_clipboard_text(translated):
+            log.error("Failed to set clipboard (%d chars)", len(translated))
+            if hud:
+                hud.show_error("clipboard locked")
+            return
         log.debug("Translation set to clipboard (%d chars)", len(translated))
         send_ctrl_v(skip_wait=True)
         if hud:
