@@ -26,10 +26,13 @@ class _TimerBase(QWidget):
         self._total_seconds = total_minutes * 60
         self._remaining = self._total_seconds
         self._running = False
+        self._finished = False  # True when timer reached 0 and is showing elapsed time
+        self._elapsed = 0  # Elapsed time since timer finished
         self._timer = QTimer()
         self._timer.timeout.connect(self._on_tick)
         self._color_normal = "#89b4fa"
         self._color_warn = "#f38ba8"
+        self._color_elapsed = "#a6a6a6"  # Gray for elapsed time display
 
         self.setStyleSheet("background: #2a2a2a; border: 1px solid #444; border-radius: 4px;")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -49,34 +52,66 @@ class _TimerBase(QWidget):
         self.load_state()
 
     def _format_time(self) -> str:
-        """Format remaining time based on duration."""
-        if self._total_seconds >= 3600:  # 4h timer
-            hours = self._remaining // 3600
-            mins = (self._remaining % 3600) // 60
-            secs = self._remaining % 60
-            return f"{hours}:{mins:02d}:{secs:02d}"
-        else:  # 20m, 90m timers
-            mins = self._remaining // 60
-            secs = self._remaining % 60
-            return f"{mins}:{secs:02d}"
+        """Format time: either remaining countdown or elapsed time after finish."""
+        # Show elapsed time if timer has finished
+        if self._finished:
+            elapsed = self._elapsed
+            if self._total_seconds >= 3600:  # 4h timer
+                hours = elapsed // 3600
+                mins = (elapsed % 3600) // 60
+                secs = elapsed % 60
+                return f"+{hours}:{mins:02d}:{secs:02d}"
+            else:  # 20m, 90m timers
+                mins = elapsed // 60
+                secs = elapsed % 60
+                return f"+{mins}:{secs:02d}"
+        else:
+            # Show countdown
+            if self._total_seconds >= 3600:  # 4h timer
+                hours = self._remaining // 3600
+                mins = (self._remaining % 3600) // 60
+                secs = self._remaining % 60
+                return f"{hours}:{mins:02d}:{secs:02d}"
+            else:  # 20m, 90m timers
+                mins = self._remaining // 60
+                secs = self._remaining % 60
+                return f"{mins}:{secs:02d}"
 
     def _on_tick(self):
-        if self._remaining > 0:
-            self._remaining -= 1
-            self._update_display()
-            if self._remaining == 0:
-                self._timer.stop()
-                self._running = False
-                self._play_alert()
-            # Save state every 60 ticks (once per minute) to avoid excessive file I/O
-            if self._remaining % 60 == 0:
-                self.save_state()
+        if self._running:
+            if self._finished:
+                # Timer finished, now counting elapsed time
+                self._elapsed += 1
+                self._update_display()
+            elif self._remaining > 0:
+                # Normal countdown
+                self._remaining -= 1
+                self._update_display()
+                if self._remaining == 0:
+                    # Timer finished - switch to elapsed time mode
+                    self._timer.stop()
+                    self._running = False
+                    self._finished = True
+                    self._elapsed = 0
+                    self._play_alert()
+                    self.save_state()
+                    # Restart timer to show elapsed time
+                    self._timer.start(1000)
+                    self._running = True
+                # Save state every 60 ticks (once per minute) to avoid excessive file I/O
+                if self._remaining % 60 == 0:
+                    self.save_state()
 
     def _update_display(self):
-        """Update display and color (red when < 1 min or < 5 min for 4h)."""
+        """Update display and color (gray for elapsed time, red for low time)."""
         text = self._format_time()
-        warn_threshold = 300 if self._total_seconds >= 3600 else 60
-        color = self._color_warn if self._remaining <= warn_threshold else self._color_normal
+        if self._finished:
+            # Gray color for elapsed time display
+            color = self._color_elapsed
+        else:
+            # Normal countdown - red when < 1 min or < 5 min for 4h
+            warn_threshold = 300 if self._total_seconds >= 3600 else 60
+            color = self._color_warn if self._remaining <= warn_threshold else self._color_normal
         self._time_lbl.setStyleSheet(f"color: {color}; background: transparent;")
         self._time_lbl.setText(text)
 
@@ -95,13 +130,25 @@ class _TimerBase(QWidget):
             e.accept()
 
     def _toggle(self):
-        """Toggle running state."""
-        if self._running:
+        """Toggle running state, or reset if showing elapsed time."""
+        if self._finished:
+            # Timer finished and showing elapsed time - reset it
+            self._timer.stop()
+            self._running = False
+            self._finished = False
+            self._remaining = self._total_seconds
+            self._elapsed = 0
+            self._update_display()
+            self.save_state()
+            log.debug(f"{self.__class__.__name__} reset from finished state")
+        elif self._running:
+            # Stop the timer
             self._timer.stop()
             self._running = False
             self.save_state()
             log.debug(f"{self.__class__.__name__} stopped")
         else:
+            # Start the timer
             if self._remaining > 0:
                 self._timer.start(1000)
                 self._running = True
@@ -131,6 +178,8 @@ class _TimerBase(QWidget):
                     "timer_name": self.__class__.__name__,
                     "remaining": self._remaining,
                     "running": self._running,
+                    "finished": self._finished,
+                    "elapsed": self._elapsed,
                     "total_seconds": self._total_seconds,
                 }
                 # Load existing state to preserve other timers
@@ -163,16 +212,24 @@ class _TimerBase(QWidget):
                     return False
 
                 self._remaining = max(0, int(state.get("remaining", self._total_seconds)))
+                self._finished = bool(state.get("finished", False))
+                self._elapsed = int(state.get("elapsed", 0))
                 running = bool(state.get("running", False))
                 self._update_display()
 
                 # If it was running, restart the timer
-                if running and self._remaining > 0:
+                if running:
+                    if self._finished:
+                        log.debug(f"{self.__class__.__name__} restored from state: showing elapsed {self._elapsed}s (running)")
+                    else:
+                        log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (running)")
                     self._timer.start(1000)
                     self._running = True
-                    log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (running)")
                 else:
-                    log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (stopped)")
+                    if self._finished:
+                        log.debug(f"{self.__class__.__name__} restored from state: showing elapsed {self._elapsed}s (stopped)")
+                    else:
+                        log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (stopped)")
 
                 return True
         except Exception as e:
