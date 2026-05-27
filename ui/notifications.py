@@ -182,3 +182,16 @@ def play_success_sound():
         winsound.Beep(800, 150)
     except Exception as e:
         log.debug("Failed to play beep: %s", e)
+
+
+def play_timer_alert():
+    """Play timer finished alert (like microwave or toaster beep)."""
+    try:
+        import winsound
+        # Triple beep pattern: 3 rapid beeps
+        for _ in range(3):
+            winsound.Beep(1000, 200)  # 1000 Hz for 200 ms
+            import time
+            time.sleep(0.1)
+    except Exception as e:
+        log.debug("Failed to play timer alert: %s", e)

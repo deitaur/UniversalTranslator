@@ -4,6 +4,7 @@ Single click = start/stop, double click = reset.
 """
 
 import logging
+import threading
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
@@ -59,6 +60,7 @@ class _TimerBase(QWidget):
             if self._remaining == 0:
                 self._timer.stop()
                 self._running = False
+                self._play_alert()
 
     def _update_display(self):
         """Update display and color (red when < 1 min or < 5 min for 4h)."""
@@ -101,6 +103,17 @@ class _TimerBase(QWidget):
         self._remaining = self._total_seconds
         self._update_display()
         log.debug(f"{self.__class__.__name__} reset to {self._total_seconds}s")
+
+    def _play_alert(self):
+        """Play timer finished alert (in background thread to avoid blocking UI)."""
+        def _alert():
+            try:
+                from ui.notifications import play_timer_alert
+                play_timer_alert()
+            except Exception as e:
+                log.warning(f"Failed to play alert: {e}")
+
+        threading.Thread(target=_alert, daemon=True).start()
 
 
 class TimerWidget20(_TimerBase):
