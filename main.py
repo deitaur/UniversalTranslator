@@ -119,8 +119,13 @@ def main():
             ("🎙", "stt",    "Voice → text (диктофон)",  "Ctrl+Alt+W", on_hotkey_whisper),
             ("⚙",  "set",    "Settings",                  "",           on_tray_settings),
         ]
-        init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
+        shelf_ctrl = init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
         show_tool_shelf()   # appear at startup above taskbar; ✕ quits, _ hides, ● pins
+
+        # Save timer state on app exit
+        def _on_app_quit():
+            shelf_ctrl.save_timers()
+        app.aboutToQuit.connect(_on_app_quit)
 
         create_tray_icon({
             "translate_clipboard": on_tray_translate,

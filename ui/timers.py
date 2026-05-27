@@ -3,6 +3,7 @@ Minimal clickable timers for tool shelf.
 Single click = start/stop, double click = reset.
 """
 
+import json
 import logging
 import threading
 from datetime import datetime
@@ -43,6 +44,9 @@ class _TimerBase(QWidget):
         self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lo.addWidget(self._time_lbl)
 
+        # Load saved state if it exists
+        self.load_state()
+
     def _format_time(self) -> str:
         """Format remaining time based on duration."""
         if self._total_seconds >= 3600:  # 4h timer
@@ -63,6 +67,9 @@ class _TimerBase(QWidget):
                 self._timer.stop()
                 self._running = False
                 self._play_alert()
+            # Save state every 5 ticks to avoid excessive file I/O
+            if self._remaining % 5 == 0:
+                self.save_state()
 
     def _update_display(self):
         """Update display and color (red when < 1 min or < 5 min for 4h)."""
@@ -91,11 +98,13 @@ class _TimerBase(QWidget):
         if self._running:
             self._timer.stop()
             self._running = False
+            self.save_state()
             log.debug(f"{self.__class__.__name__} stopped")
         else:
             if self._remaining > 0:
                 self._timer.start(1000)
                 self._running = True
+                self.save_state()
                 log.debug(f"{self.__class__.__name__} started")
 
     def _reset(self):
@@ -104,7 +113,62 @@ class _TimerBase(QWidget):
         self._running = False
         self._remaining = self._total_seconds
         self._update_display()
+        self.save_state()
         log.debug(f"{self.__class__.__name__} reset to {self._total_seconds}s")
+
+    def save_state(self):
+        """Save timer state to JSON file."""
+        try:
+            from config import CONFIG_DIR
+            state_file = CONFIG_DIR / "timers_state.json"
+            state = {
+                "timer_name": self.__class__.__name__,
+                "remaining": self._remaining,
+                "running": self._running,
+                "total_seconds": self._total_seconds,
+            }
+            # Load existing state to preserve other timers
+            all_states = {}
+            if state_file.exists():
+                try:
+                    all_states = json.loads(state_file.read_text(encoding="utf-8"))
+                except Exception as e:
+                    log.warning(f"Failed to read existing state: {e}")
+
+            all_states[self.__class__.__name__] = state
+            state_file.write_text(json.dumps(all_states, indent=2), encoding="utf-8")
+        except Exception as e:
+            log.warning(f"Failed to save timer state: {e}")
+
+    def load_state(self):
+        """Load timer state from JSON file, returns True if state was restored."""
+        try:
+            from config import CONFIG_DIR
+            state_file = CONFIG_DIR / "timers_state.json"
+            if not state_file.exists():
+                return False
+
+            all_states = json.loads(state_file.read_text(encoding="utf-8"))
+            state = all_states.get(self.__class__.__name__)
+            if not state:
+                return False
+
+            self._remaining = max(0, int(state.get("remaining", self._total_seconds)))
+            running = bool(state.get("running", False))
+            self._update_display()
+
+            # If it was running, restart the timer
+            if running and self._remaining > 0:
+                self._timer.start(1000)
+                self._running = True
+                log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (running)")
+            else:
+                log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (stopped)")
+
+            return True
+        except Exception as e:
+            log.warning(f"Failed to load timer state: {e}")
+            return False
 
     def _play_alert(self):
         """Play timer finished alert (in background thread to avoid blocking UI)."""

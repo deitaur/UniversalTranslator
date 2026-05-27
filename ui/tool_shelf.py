@@ -188,11 +188,16 @@ class _ShelfWidget(QWidget):
             row.addWidget(btn)
 
         # Add timers (clickable: single=toggle, double=reset)
+        self._timers = []
         try:
             from ui.timers import TimerWidget20, TimerWidget90, TimerWidget240
-            row.addWidget(TimerWidget20())
-            row.addWidget(TimerWidget90())
-            row.addWidget(TimerWidget240())
+            t20 = TimerWidget20()
+            t90 = TimerWidget90()
+            t240 = TimerWidget240()
+            row.addWidget(t20)
+            row.addWidget(t90)
+            row.addWidget(t240)
+            self._timers = [t20, t90, t240]
         except Exception as e:
             import logging
             logging.getLogger("tool_shelf").error("Failed to load timers: %s", e, exc_info=True)
@@ -297,6 +302,11 @@ class _ShelfWidget(QWidget):
         if e.key() == Qt.Key.Key_Escape:
             self._on_hide()
 
+    def save_all_timers(self):
+        """Save state of all timers."""
+        for timer in self._timers:
+            timer.save_state()
+
 
 # ── Controller ────────────────────────────────────────────────────────────────
 
@@ -329,6 +339,11 @@ class ToolShelf(QObject):
     def hide(self):
         """Hide the shelf. Safe from any thread."""
         self._hide_sig.emit()
+
+    def save_timers(self):
+        """Save state of all timers. Safe to call from any thread."""
+        if self._widget is not None:
+            self._widget.save_all_timers()
 
     # ── Slots (Qt main thread) ────────────────────────────────────────────────
 
