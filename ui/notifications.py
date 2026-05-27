@@ -172,3 +172,13 @@ def show_translation_toast(message: str, duration_ms: int = 5000):
         _manager._trans_sig.emit(message, duration_ms)
     else:
         log.warning("show_translation_toast before setup_notifications: %s", message)
+
+
+def play_success_sound():
+    """Play a success beep notification."""
+    try:
+        import winsound
+        # 800 Hz for 150 ms
+        winsound.Beep(800, 150)
+    except Exception as e:
+        log.debug("Failed to play beep: %s", e)

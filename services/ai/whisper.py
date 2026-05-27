@@ -322,9 +322,15 @@ def _start_recording(target_hwnd: int = 0):
             _pipe_show_error(f"Ошибка обработки: {str(e)[:55]}")
             return
 
-        # ── Stage 4: paste ──
+        # ── Stage 4: paste & notify ──
         _pipe_set_status("Вставляю…")
         pasted = _paste_into(target_hwnd, processed)
+
+        # Play success sound + show toast for translation
+        if choice["translate"]:
+            from ui.notifications import play_success_sound, show_translation_toast
+            play_success_sound()
+            show_translation_toast(processed)
 
         preview = processed[:100] + ("…" if len(processed) > 100 else "")
         label = "✓ вставлено" if pasted else "✓ в буфере"

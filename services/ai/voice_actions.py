@@ -170,4 +170,7 @@ def apply_translate(text: str, status_cb: StatusCb = None) -> str:
         status_cb("Перевожу…")
     from app.translation import translate_auto
     translated, _ = translate_auto(text)
-    return translated or text
+    result = translated or text
+    if status_cb and translated:
+        status_cb("✓ перевод готов")
+    return result
