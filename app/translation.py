@@ -5,9 +5,6 @@ import time
 import traceback
 
 import globals as g
-from services.translators.deepl import DeepLEngine
-from services.translators.google import GoogleEngine
-from services.translators.yandex import YandexEngine
 from ui.notifications import show_toast
 from win32.clipboard import get_clipboard_text, set_clipboard_text
 from win32.keyboard import send_ctrl_c
@@ -16,11 +13,15 @@ log = logging.getLogger("translation")
 
 
 def _get_engine():
+    """Lazy load translator engine only when needed."""
     if g.current_engine == "google":
+        from services.translators.google import GoogleEngine
         return GoogleEngine()
     elif g.current_engine == "yandex":
+        from services.translators.yandex import YandexEngine
         return YandexEngine()
     else:
+        from services.translators.deepl import DeepLEngine
         return DeepLEngine()
 
 

@@ -14,7 +14,6 @@ from PySide6.QtWidgets import QApplication
 
 import globals as g
 from config import APP_NAME, CONFIG_DIR, config, load_config
-from services.translators.deepl import DeepLEngine
 from ui.icon_generator import generate_app_icon
 from ui.tray_menu import create_tray_icon
 from win32.single_instance import check_single_instance, release_mutex
@@ -82,6 +81,7 @@ def main():
 
         if g.current_engine == "deepl":
             try:
+                from services.translators.deepl import DeepLEngine
                 engine = DeepLEngine()
                 count, limit = engine.get_usage()
                 g.usage_data["character_count"] = count
