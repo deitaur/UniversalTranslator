@@ -9,7 +9,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 log = logging.getLogger("timers")
@@ -114,6 +114,8 @@ class _TimerBase(QWidget):
             color = self._color_warn if self._remaining <= warn_threshold else self._color_normal
         self._time_lbl.setStyleSheet(f"color: {color}; background: transparent;")
         self._time_lbl.setText(text)
+        # Redraw the progress circle
+        self.update()
 
     def mousePressEvent(self, e):
         """Single click = toggle."""
@@ -128,6 +130,35 @@ class _TimerBase(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self._reset()
             e.accept()
+
+    def paintEvent(self, _e):
+        """Draw shrinking progress circle at top."""
+        super().paintEvent(_e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Calculate progress (1.0 = full, 0.0 = empty)
+        if self._finished:
+            # When showing elapsed time, minimal circle
+            progress = 0.05
+        else:
+            # Normal countdown progress
+            progress = max(0.05, self._remaining / self._total_seconds)
+
+        # Circle parameters
+        circle_radius = 6  # Base radius in pixels
+        current_radius = int(circle_radius * progress)
+        circle_x = self.width() // 2
+        circle_y = 8  # Top margin
+
+        # Draw circle
+        color = QColor(self._color_normal if not self._finished else self._color_elapsed)
+        p.setBrush(QBrush(color))
+        p.setPen(QPen(color, 0))
+
+        if current_radius > 0:
+            p.drawEllipse(circle_x - current_radius, circle_y - current_radius,
+                         current_radius * 2, current_radius * 2)
 
     def _toggle(self):
         """Toggle running state, or reset if showing elapsed time."""
