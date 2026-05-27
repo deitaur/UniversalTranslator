@@ -187,11 +187,12 @@ class _ShelfWidget(QWidget):
             btn = _ToolBtn(icon, label, tip, cb)
             row.addWidget(btn)
 
-        # Add timers
+        # Add timers (clickable: single=toggle, double=reset)
         try:
-            from ui.timers import TimerWidget90, TimerWidget20
-            row.addWidget(TimerWidget90())
+            from ui.timers import TimerWidget20, TimerWidget90, TimerWidget240
             row.addWidget(TimerWidget20())
+            row.addWidget(TimerWidget90())
+            row.addWidget(TimerWidget240())
         except Exception as e:
             import logging
             logging.getLogger("tool_shelf").error("Failed to load timers: %s", e, exc_info=True)

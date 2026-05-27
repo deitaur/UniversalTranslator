@@ -1,69 +1,52 @@
 """
-Minimal timers for tool shelf — 90 min (with controls) and 20 min (simple).
+Minimal clickable timers for tool shelf.
+Single click = start/stop, double click = reset.
 """
 
-import threading
-import time
-from typing import Callable, Optional
-
-from PySide6.QtCore import QObject, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-_FONT_TIME = QFont("Courier New", 9)
-_FONT_SMALL = QFont("Segoe UI", 7)
+_FONT_TIME = QFont("Courier New", 10, QFont.Weight.Bold)
 
-class TimerWidget90(QWidget):
-    """90-minute timer with start/pause/stop buttons."""
 
-    def __init__(self):
+class _TimerBase(QWidget):
+    """Base class for clickable timers."""
+
+    def __init__(self, total_minutes: int):
         super().__init__()
-        self._total_seconds = 90 * 60  # 90 minutes
+        self._total_seconds = total_minutes * 60
         self._remaining = self._total_seconds
         self._running = False
         self._timer = QTimer()
         self._timer.timeout.connect(self._on_tick)
+        self._color_normal = "#89b4fa"
+        self._color_warn = "#f38ba8"
 
-        self.setFixedSize(80, 60)
         self.setStyleSheet("background: #2a2a2a; border: 1px solid #444; border-radius: 4px;")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lo = QVBoxLayout(self)
-        lo.setContentsMargins(4, 4, 4, 4)
-        lo.setSpacing(2)
+        lo.setContentsMargins(6, 8, 6, 8)
+        lo.setSpacing(0)
 
-        # Time display
-        self._time_lbl = QLabel("90:00")
+        self._time_lbl = QLabel(self._format_time())
         self._time_lbl.setFont(_FONT_TIME)
-        self._time_lbl.setStyleSheet("color: #89b4fa; background: transparent;")
-        self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self._time_lbl.setStyleSheet(f"color: {self._color_normal}; background: transparent;")
+        self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lo.addWidget(self._time_lbl)
 
-        # Control buttons
-        btn_lo = QHBoxLayout()
-        btn_lo.setContentsMargins(0, 0, 0, 0)
-        btn_lo.setSpacing(2)
-
-        self._play_btn = QPushButton("▶")
-        self._play_btn.setFixedSize(20, 16)
-        self._play_btn.setFont(_FONT_SMALL)
-        self._play_btn.setStyleSheet(
-            "QPushButton { background: #44475a; color: #89b4fa; border: none; border-radius: 2px; }"
-            "QPushButton:hover { background: #565970; }"
-        )
-        self._play_btn.clicked.connect(self._toggle_play)
-        btn_lo.addWidget(self._play_btn)
-
-        self._reset_btn = QPushButton("⊘")
-        self._reset_btn.setFixedSize(20, 16)
-        self._reset_btn.setFont(_FONT_SMALL)
-        self._reset_btn.setStyleSheet(
-            "QPushButton { background: #44475a; color: #f38ba8; border: none; border-radius: 2px; }"
-            "QPushButton:hover { background: #565970; }"
-        )
-        self._reset_btn.clicked.connect(self._reset)
-        btn_lo.addWidget(self._reset_btn)
-
-        lo.addLayout(btn_lo)
+    def _format_time(self) -> str:
+        """Format remaining time based on duration."""
+        if self._total_seconds >= 3600:  # 4h timer
+            hours = self._remaining // 3600
+            mins = (self._remaining % 3600) // 60
+            secs = self._remaining % 60
+            return f"{hours}:{mins:02d}:{secs:02d}"
+        else:  # 20m, 90m timers
+            mins = self._remaining // 60
+            secs = self._remaining % 60
+            return f"{mins}:{secs:02d}"
 
     def _on_tick(self):
         if self._remaining > 0:
@@ -72,78 +55,61 @@ class TimerWidget90(QWidget):
             if self._remaining == 0:
                 self._timer.stop()
                 self._running = False
-                self._play_btn.setText("▶")
 
     def _update_display(self):
-        mins, secs = divmod(self._remaining, 60)
-        self._time_lbl.setText(f"{mins}:{secs:02d}")
+        """Update display and color (red when < 1 min or < 5 min for 4h)."""
+        text = self._format_time()
+        warn_threshold = 300 if self._total_seconds >= 3600 else 60
+        color = self._color_warn if self._remaining <= warn_threshold else self._color_normal
+        self._time_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+        self._time_lbl.setText(text)
 
-    def _toggle_play(self):
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            if e.count() == 2:  # Double click
+                self._reset()
+            else:  # Single click
+                self._toggle()
+            e.accept()
+
+    def _toggle(self):
+        """Toggle running state."""
         if self._running:
             self._timer.stop()
-            self._play_btn.setText("▶")
             self._running = False
         else:
             if self._remaining > 0:
-                self._timer.start(1000)  # 1 second tick
-                self._play_btn.setText("⏸")
+                self._timer.start(1000)
                 self._running = True
 
     def _reset(self):
+        """Reset timer and stop."""
         self._timer.stop()
         self._running = False
         self._remaining = self._total_seconds
         self._update_display()
-        self._play_btn.setText("▶")
 
 
-class TimerWidget20(QWidget):
-    """20-minute simple countdown timer."""
+class TimerWidget20(_TimerBase):
+    """20-minute clickable timer."""
 
     def __init__(self):
-        super().__init__()
-        self._total_seconds = 20 * 60  # 20 minutes
-        self._remaining = self._total_seconds
-        self._timer = QTimer()
-        self._timer.timeout.connect(self._on_tick)
+        super().__init__(20)
+        self.setFixedSize(65, 50)
 
-        self.setFixedSize(60, 50)
-        self.setStyleSheet("background: #2a2a2a; border: 1px solid #444; border-radius: 4px;")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        lo = QVBoxLayout(self)
-        lo.setContentsMargins(4, 6, 4, 6)
-        lo.setSpacing(0)
+class TimerWidget90(_TimerBase):
+    """90-minute clickable timer."""
 
-        # Time display (clickable to toggle)
-        self._time_lbl = QLabel("20:00")
-        self._time_lbl.setFont(_FONT_TIME)
-        self._time_lbl.setStyleSheet("color: #a6e3a1; background: transparent;")
-        self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        lo.addWidget(self._time_lbl)
+    def __init__(self):
+        super().__init__(90)
+        self.setFixedSize(75, 50)
 
-        self.mousePressEvent = self._on_click
 
-    def _on_tick(self):
-        if self._remaining > 0:
-            self._remaining -= 1
-            self._update_display()
-            if self._remaining == 0:
-                self._timer.stop()
+class TimerWidget240(_TimerBase):
+    """4-hour (240-minute) clickable timer."""
 
-    def _update_display(self):
-        mins, secs = divmod(self._remaining, 60)
-        color = "#ff6b6b" if self._remaining < 60 else "#a6e3a1"  # Red if < 1 min
-        self._time_lbl.setStyleSheet(f"color: {color}; background: transparent;")
-        self._time_lbl.setText(f"{mins}:{secs:02d}")
-
-    def _on_click(self, _e):
-        if self._timer.isActive():
-            self._timer.stop()
-        else:
-            if self._remaining > 0:
-                self._timer.start(1000)
-            else:
-                self._remaining = self._total_seconds
-                self._update_display()
-                self._timer.start(1000)
+    def __init__(self):
+        super().__init__(240)
+        self._color_normal = "#a6e3a1"  # Green for long timer
+        self.setFixedSize(85, 50)
