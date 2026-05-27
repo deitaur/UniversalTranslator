@@ -68,8 +68,8 @@ class _TimerBase(QWidget):
                 self._timer.stop()
                 self._running = False
                 self._play_alert()
-            # Save state every 5 ticks to avoid excessive file I/O
-            if self._remaining % 5 == 0:
+            # Save state every 60 ticks (once per minute) to avoid excessive file I/O
+            if self._remaining % 60 == 0:
                 self.save_state()
 
     def _update_display(self):
