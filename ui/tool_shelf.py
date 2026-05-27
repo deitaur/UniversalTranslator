@@ -186,6 +186,12 @@ class _ShelfWidget(QWidget):
             tip = f"{tooltip}  {hotkey}" if hotkey else tooltip
             btn = _ToolBtn(icon, label, tip, cb)
             row.addWidget(btn)
+
+        # Add timers
+        from ui.timers import TimerWidget90, TimerWidget20
+        row.addWidget(TimerWidget90())
+        row.addWidget(TimerWidget20())
+
         root.addLayout(row)
 
         # ── Auto-hide timer (active only when unpinned) ───────────────────────
