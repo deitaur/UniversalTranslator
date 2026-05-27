@@ -129,16 +129,7 @@ def main():
         # Voice chat and voice actions are lazy-loaded when first needed
         # (in on_hotkey_voicechat_handler and on_hotkey_whisper)
 
-        # ── Tool shelf (ZBrush-style icon strip) ──
-        from ui.tool_shelf import init_tool_shelf, show_tool_shelf
-        _shelf_tools = [
-            ("🎙", "stt",    "Voice → text (диктофон)",  "Ctrl+Alt+W", _on_hotkey_whisper_lazy),
-            ("⚙",  "set",    "Settings",                  "",           on_tray_settings),
-        ]
-        shelf_ctrl = init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
-        show_tool_shelf()   # appear at startup above taskbar; ✕ quits, _ hides, ● pins
-
-        # Create lazy-loaded callbacks for heavy features
+        # Create lazy-loaded callbacks for heavy features BEFORE using them
         def _on_hotkey_whisper_lazy():
             from app.hotkey_handlers import on_hotkey_whisper
             on_hotkey_whisper()
@@ -150,6 +141,15 @@ def main():
         def _on_voice_chat_lazy():
             from ui.voice_chat_dialog import show_voice_chat_dialog
             show_voice_chat_dialog()
+
+        # ── Tool shelf (ZBrush-style icon strip) ──
+        from ui.tool_shelf import init_tool_shelf, show_tool_shelf
+        _shelf_tools = [
+            ("🎙", "stt",    "Voice → text (диктофон)",  "Ctrl+Alt+W", _on_hotkey_whisper_lazy),
+            ("⚙",  "set",    "Settings",                  "",           on_tray_settings),
+        ]
+        shelf_ctrl = init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
+        show_tool_shelf()   # appear at startup above taskbar; ✕ quits, _ hides, ● pins
 
         # Proper cleanup on app exit
         def _on_app_quit():
