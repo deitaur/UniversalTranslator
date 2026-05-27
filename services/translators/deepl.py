@@ -31,7 +31,7 @@ class DeepLEngine:
             f"{deepl_api_base}/translate",
             headers=self.deepl_headers(),
             data={"text": text, "source_lang": get_source_lang_upper(), "target_lang": "EN"},
-            timeout=30,
+            timeout=(4, 20),
         )
         r.raise_for_status()
         translations = r.json().get("translations", [])
@@ -43,7 +43,7 @@ class DeepLEngine:
             f"{deepl_api_base}/translate",
             headers=self.deepl_headers(),
             data={"text": text, "source_lang": "EN", "target_lang": get_target_lang_upper()},
-            timeout=30,
+            timeout=(4, 20),
         )
         r.raise_for_status()
         translations = r.json().get("translations", [])
@@ -55,7 +55,7 @@ class DeepLEngine:
             f"{deepl_api_base}/translate",
             headers=self.deepl_headers(),
             data={"text": text, "target_lang": target_lang_code.upper()},
-            timeout=30,
+            timeout=(4, 20),
         )
         r.raise_for_status()
         translations = r.json().get("translations", [])

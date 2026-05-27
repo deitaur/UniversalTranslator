@@ -41,7 +41,8 @@ def _replace_worker(text: str, hud):
         # Hard upper bound — if translate_auto somehow blocks past the
         # underlying request timeout, surface an error instead of leaving
         # the HUD stuck on "translating…" forever.
-        if not done.wait(25) and hud:
+        # With (4, 20) split timeouts, max delay should be ~20s; 15s watchdog catches actual hangs.
+        if not done.wait(15) and hud:
             hud.show_error("timed out")
     threading.Thread(target=_watchdog, daemon=True).start()
 

@@ -29,7 +29,7 @@ class YandexEngine:
             "Authorization": f"Api-Key {api_key}",
             "Content-Type": "application/json",
         }
-        r = requests.post(YANDEX_API_URL, json=body, headers=headers, timeout=30)
+        r = requests.post(YANDEX_API_URL, json=body, headers=headers, timeout=(4, 20))
         r.raise_for_status()
         data = r.json()
         translations = data.get("translations", [])
@@ -55,7 +55,7 @@ class YandexEngine:
             "Authorization": f"Api-Key {api_key}",
             "Content-Type": "application/json",
         }
-        r = requests.post(YANDEX_API_URL, json=body, headers=headers, timeout=30)
+        r = requests.post(YANDEX_API_URL, json=body, headers=headers, timeout=(4, 20))
         r.raise_for_status()
         data = r.json()
         translations = data.get("translations", [])
@@ -77,7 +77,7 @@ class YandexEngine:
             "targetLanguageCode": target_lang_code,
         }
         headers = {"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"}
-        r = requests.post(YANDEX_API_URL, json=body, headers=headers, timeout=30)
+        r = requests.post(YANDEX_API_URL, json=body, headers=headers, timeout=(4, 20))
         r.raise_for_status()
         translations = r.json().get("translations", [])
         return translations[0]["text"] if translations and translations[0].get("text") \
