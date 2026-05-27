@@ -132,13 +132,17 @@ def main():
         # ── Tool shelf (ZBrush-style icon strip) ──
         from ui.tool_shelf import init_tool_shelf, show_tool_shelf
         _shelf_tools = [
-            ("🎙", "stt",    "Voice → text (диктофон)",  "Ctrl+Alt+W", on_hotkey_whisper),
+            ("🎙", "stt",    "Voice → text (диктофон)",  "Ctrl+Alt+W", _on_hotkey_whisper_lazy),
             ("⚙",  "set",    "Settings",                  "",           on_tray_settings),
         ]
         shelf_ctrl = init_tool_shelf(_shelf_tools, on_quit=on_tray_quit)
         show_tool_shelf()   # appear at startup above taskbar; ✕ quits, _ hides, ● pins
 
         # Create lazy-loaded callbacks for heavy features
+        def _on_hotkey_whisper_lazy():
+            from app.hotkey_handlers import on_hotkey_whisper
+            on_hotkey_whisper()
+
         def _on_tray_whisper_lazy():
             from services.ai.whisper import on_tray_whisper
             on_tray_whisper()
