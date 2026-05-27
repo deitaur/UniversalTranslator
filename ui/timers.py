@@ -118,9 +118,13 @@ class _TimerBase(QWidget):
         log.debug(f"{self.__class__.__name__} reset to {self._total_seconds}s")
 
     def save_state(self):
-        """Save timer state to JSON file."""
+        """Save timer state to JSON file. Non-blocking to avoid deadlocks."""
         try:
-            with _state_lock:
+            # Use non-blocking acquire to avoid deadlocking with other operations
+            if not _state_lock.acquire(blocking=False):
+                log.debug(f"State lock unavailable, skipping save for {self.__class__.__name__}")
+                return
+            try:
                 from config import CONFIG_DIR
                 state_file = CONFIG_DIR / "timers_state.json"
                 state = {
@@ -139,6 +143,8 @@ class _TimerBase(QWidget):
 
                 all_states[self.__class__.__name__] = state
                 state_file.write_text(json.dumps(all_states, indent=2), encoding="utf-8")
+            finally:
+                _state_lock.release()
         except Exception as e:
             log.warning(f"Failed to save timer state: {e}")
 
