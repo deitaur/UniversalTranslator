@@ -3,9 +3,12 @@ Minimal clickable timers for tool shelf.
 Single click = start/stop, double click = reset.
 """
 
+import logging
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+log = logging.getLogger("timers")
 
 _FONT_TIME = QFont("Courier New", 10, QFont.Weight.Bold)
 
@@ -25,6 +28,7 @@ class _TimerBase(QWidget):
 
         self.setStyleSheet("background: #2a2a2a; border: 1px solid #444; border-radius: 4px;")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         lo = QVBoxLayout(self)
         lo.setContentsMargins(6, 8, 6, 8)
@@ -65,11 +69,17 @@ class _TimerBase(QWidget):
         self._time_lbl.setText(text)
 
     def mousePressEvent(self, e):
+        """Single click = toggle."""
+        log.debug(f"Mouse press on {self.__class__.__name__}")
         if e.button() == Qt.MouseButton.LeftButton:
-            if e.count() == 2:  # Double click
-                self._reset()
-            else:  # Single click
-                self._toggle()
+            self._toggle()
+            e.accept()
+
+    def mouseDoubleClickEvent(self, e):
+        """Double click = reset."""
+        log.debug(f"Double click on {self.__class__.__name__}")
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._reset()
             e.accept()
 
     def _toggle(self):
@@ -77,10 +87,12 @@ class _TimerBase(QWidget):
         if self._running:
             self._timer.stop()
             self._running = False
+            log.debug(f"{self.__class__.__name__} stopped")
         else:
             if self._remaining > 0:
                 self._timer.start(1000)
                 self._running = True
+                log.debug(f"{self.__class__.__name__} started")
 
     def _reset(self):
         """Reset timer and stop."""
@@ -88,6 +100,7 @@ class _TimerBase(QWidget):
         self._running = False
         self._remaining = self._total_seconds
         self._update_display()
+        log.debug(f"{self.__class__.__name__} reset to {self._total_seconds}s")
 
 
 class TimerWidget20(_TimerBase):
