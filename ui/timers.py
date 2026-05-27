@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 log = logging.getLogger("timers")
 
 _FONT_TIME = QFont("Courier New", 10, QFont.Weight.Bold)
+_state_lock = threading.Lock()  # Protect concurrent state file access
 
 
 class _TimerBase(QWidget):
@@ -119,53 +120,55 @@ class _TimerBase(QWidget):
     def save_state(self):
         """Save timer state to JSON file."""
         try:
-            from config import CONFIG_DIR
-            state_file = CONFIG_DIR / "timers_state.json"
-            state = {
-                "timer_name": self.__class__.__name__,
-                "remaining": self._remaining,
-                "running": self._running,
-                "total_seconds": self._total_seconds,
-            }
-            # Load existing state to preserve other timers
-            all_states = {}
-            if state_file.exists():
-                try:
-                    all_states = json.loads(state_file.read_text(encoding="utf-8"))
-                except Exception as e:
-                    log.warning(f"Failed to read existing state: {e}")
+            with _state_lock:
+                from config import CONFIG_DIR
+                state_file = CONFIG_DIR / "timers_state.json"
+                state = {
+                    "timer_name": self.__class__.__name__,
+                    "remaining": self._remaining,
+                    "running": self._running,
+                    "total_seconds": self._total_seconds,
+                }
+                # Load existing state to preserve other timers
+                all_states = {}
+                if state_file.exists():
+                    try:
+                        all_states = json.loads(state_file.read_text(encoding="utf-8"))
+                    except Exception as e:
+                        log.warning(f"Failed to read existing state: {e}")
 
-            all_states[self.__class__.__name__] = state
-            state_file.write_text(json.dumps(all_states, indent=2), encoding="utf-8")
+                all_states[self.__class__.__name__] = state
+                state_file.write_text(json.dumps(all_states, indent=2), encoding="utf-8")
         except Exception as e:
             log.warning(f"Failed to save timer state: {e}")
 
     def load_state(self):
         """Load timer state from JSON file, returns True if state was restored."""
         try:
-            from config import CONFIG_DIR
-            state_file = CONFIG_DIR / "timers_state.json"
-            if not state_file.exists():
-                return False
+            with _state_lock:
+                from config import CONFIG_DIR
+                state_file = CONFIG_DIR / "timers_state.json"
+                if not state_file.exists():
+                    return False
 
-            all_states = json.loads(state_file.read_text(encoding="utf-8"))
-            state = all_states.get(self.__class__.__name__)
-            if not state:
-                return False
+                all_states = json.loads(state_file.read_text(encoding="utf-8"))
+                state = all_states.get(self.__class__.__name__)
+                if not state:
+                    return False
 
-            self._remaining = max(0, int(state.get("remaining", self._total_seconds)))
-            running = bool(state.get("running", False))
-            self._update_display()
+                self._remaining = max(0, int(state.get("remaining", self._total_seconds)))
+                running = bool(state.get("running", False))
+                self._update_display()
 
-            # If it was running, restart the timer
-            if running and self._remaining > 0:
-                self._timer.start(1000)
-                self._running = True
-                log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (running)")
-            else:
-                log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (stopped)")
+                # If it was running, restart the timer
+                if running and self._remaining > 0:
+                    self._timer.start(1000)
+                    self._running = True
+                    log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (running)")
+                else:
+                    log.debug(f"{self.__class__.__name__} restored from state: {self._remaining}s (stopped)")
 
-            return True
+                return True
         except Exception as e:
             log.warning(f"Failed to load timer state: {e}")
             return False
