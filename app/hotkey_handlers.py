@@ -85,6 +85,11 @@ def _replace_worker(text: str, hud):
 def on_hotkey_replace():
     log.debug("on_hotkey_replace called")
 
+    # Skip in AnyDesk mode - keyboard operations are unreliable
+    if config.get("remote_session_mode", False):
+        show_toast("Disabled in remote mode. Use Settings to disable remote mode.", 3000)
+        return
+
     # Grab selection BEFORE opening HUD — window creation can steal focus.
     # Must stay on the listener thread: Ctrl+C needs modifier-release timing.
     text = grab_selected_text()

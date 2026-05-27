@@ -97,6 +97,9 @@ def _send_combo(vk_modifier: int, vk_key: int):
 
 def send_ctrl_c():
     """Copy selection to clipboard via SendInput (works in Electron/browser/UWP)."""
+    from config import config
+    if config.get("remote_session_mode", False):
+        return  # Skip keyboard operations in remote mode
     _wait_for_modifiers_release()
     time.sleep(0.05)   # brief settle after modifiers released
     _send_combo(0x11, 0x43)   # Ctrl+C
@@ -115,8 +118,11 @@ def restore_foreground(hwnd: int) -> bool:
     documented workaround is to press a key first (the OS treats that as
     user activity and grants our process foreground rights for one call).
     Returns True on success."""
+    from config import config
     if not hwnd:
         return False
+    if config.get("remote_session_mode", False):
+        return False  # Skip in remote mode - Alt press can interfere
     try:
         # Tap Alt to gain SetForegroundWindow privilege for the next call.
         user32.keybd_event(0x12, 0, 0, 0)
@@ -130,6 +136,9 @@ def send_ctrl_v(skip_wait: bool = False):
     """Paste from clipboard via SendInput.
     skip_wait=True skips modifier-release wait (safe when called after a long operation
     like a translation API call, since keys are definitely released by then)."""
+    from config import config
+    if config.get("remote_session_mode", False):
+        return  # Skip keyboard operations in remote mode
     if not skip_wait:
         _wait_for_modifiers_release()
     time.sleep(0.05)
