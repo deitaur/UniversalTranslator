@@ -92,21 +92,29 @@ def on_hotkey_replace():
 
     # Grab selection BEFORE opening HUD — window creation can steal focus.
     # Must stay on the listener thread: Ctrl+C needs modifier-release timing.
-    text = grab_selected_text()
-    if not text.strip():
-        log.debug("No text selected, skipping")
-        show_toast("Select text first (Ctrl+Alt+R)", 2000)
-        return
+    try:
+        text = grab_selected_text()
+        if not text.strip():
+            log.debug("No text selected, skipping")
+            show_toast("Select text first (Ctrl+Alt+R)", 2000)
+            return
 
-    log.debug("Text (%d chars): %s...", len(text), text[:50])
+        log.debug("Text (%d chars): %s...", len(text), text[:50])
 
-    from ui.hud import get_pipe_hud
-    hud = get_pipe_hud()
-    if hud:
-        hud.open_at_cursor()
-        hud.set_status("translating…")
+        from ui.hud import get_pipe_hud
+        hud = get_pipe_hud()
+        if hud:
+            try:
+                hud.open_at_cursor()
+                hud.set_status("translating…")
+            except Exception as e:
+                log.error("HUD error: %s", e, exc_info=True)
+                hud = None
 
-    threading.Thread(target=_replace_worker, args=(text, hud), daemon=True).start()
+        threading.Thread(target=_replace_worker, args=(text, hud), daemon=True).start()
+    except Exception as e:
+        log.error("on_hotkey_replace error: %s", e, exc_info=True)
+        show_toast("Error: check log", 2000)
 
 
 def _popup_worker(text: str):
@@ -120,52 +128,74 @@ def _popup_worker(text: str):
 
 def on_hotkey_popup():
     log.debug("on_hotkey_popup called")
-    text = grab_selected_text()
-    if not text.strip():
-        return
-    threading.Thread(target=_popup_worker, args=(text,), daemon=True).start()
+    try:
+        text = grab_selected_text()
+        if not text.strip():
+            return
+        threading.Thread(target=_popup_worker, args=(text,), daemon=True).start()
+    except Exception as e:
+        log.error("on_hotkey_popup error: %s", e, exc_info=True)
 
 
 def on_hotkey_clipboard():
     log.debug("on_hotkey_clipboard called")
-    text = get_clipboard_text()
-    if not text.strip():
-        return
-    translated = translate_text(text)
-    if translated:
-        set_clipboard_text(translated)
-        show_toast("Translated to clipboard")
+    try:
+        text = get_clipboard_text()
+        if not text.strip():
+            return
+        translated = translate_text(text)
+        if translated:
+            set_clipboard_text(translated)
+            show_toast("Translated to clipboard")
+    except Exception as e:
+        log.error("on_hotkey_clipboard error: %s", e, exc_info=True)
+        show_toast("Error: check log", 2000)
 
 
 # ── AI hotkeys ────────────────────────────────────────────────────────────────
 
 def on_hotkey_whisper():
-    _flash("voice → text  Ctrl+Alt+W")
-    on_tray_whisper()
+    try:
+        _flash("voice → text  Ctrl+Alt+W")
+        on_tray_whisper()
+    except Exception as e:
+        log.error("on_hotkey_whisper error: %s", e, exc_info=True)
 
 
 def on_hotkey_dictation_handler():
-    _flash("dictation  Ctrl+Alt+D")
-    on_hotkey_dictation()
+    try:
+        _flash("dictation  Ctrl+Alt+D")
+        on_hotkey_dictation()
+    except Exception as e:
+        log.error("on_hotkey_dictation_handler error: %s", e, exc_info=True)
 
 
 def on_hotkey_negotiator():
-    _flash("negotiator  Ctrl+Alt+N")
-    text = grab_selected_text()
-    if text and text.strip():
-        show_chat_window(
-            "Rewrite this to sound more persuasive and professional:\n\n" + text,
-            mode="negotiator",
-        )
-    else:
-        show_chat_window(mode="negotiator")
+    try:
+        _flash("negotiator  Ctrl+Alt+N")
+        text = grab_selected_text()
+        if text and text.strip():
+            show_chat_window(
+                "Rewrite this to sound more persuasive and professional:\n\n" + text,
+                mode="negotiator",
+            )
+        else:
+            show_chat_window(mode="negotiator")
+    except Exception as e:
+        log.error("on_hotkey_negotiator error: %s", e, exc_info=True)
 
 
 def on_hotkey_websearch():
-    _flash("web_search  Ctrl+Alt+S")
-    show_chat_window(mode="web_search")
+    try:
+        _flash("web_search  Ctrl+Alt+S")
+        show_chat_window(mode="web_search")
+    except Exception as e:
+        log.error("on_hotkey_websearch error: %s", e, exc_info=True)
 
 
 def on_hotkey_voicechat_handler():
-    _flash("voice chat  Ctrl+Alt+V")
-    on_hotkey_voicechat()
+    try:
+        _flash("voice chat  Ctrl+Alt+V")
+        on_hotkey_voicechat()
+    except Exception as e:
+        log.error("on_hotkey_voicechat_handler error: %s", e, exc_info=True)
