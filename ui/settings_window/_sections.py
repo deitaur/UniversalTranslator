@@ -358,6 +358,15 @@ def build_system_section(win, lo):
     win._direct_cb.setStyleSheet(_SS_CHECK)
     s.add(win._direct_cb)
 
+    s.add_spacing(8)
+    win._remote_mode_cb = QCheckBox("Remote session mode  (AnyDesk/TeamViewer)")
+    win._remote_mode_cb.setFont(_F_LABEL)
+    win._remote_mode_cb.setChecked(config.get("remote_session_mode", False))
+    win._remote_mode_cb.setStyleSheet(_SS_CHECK)
+    s.add(win._remote_mode_cb)
+    hint = _lbl("When enabled: results go to clipboard only, no auto-paste via Ctrl+V", C["muted"])
+    s.add(hint)
+
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ import threading
 
 import globals as g
 from app.translation import grab_selected_text, translate_auto, translate_text
+from config import config
 from services.ai.dictation import on_hotkey_dictation
 from services.ai.voice_chat import on_hotkey_voicechat
 from services.ai.whisper import on_tray_whisper
@@ -61,7 +62,14 @@ def _replace_worker(text: str, hud):
                 hud.show_error("clipboard locked")
             return
         log.debug("Translation set to clipboard (%d chars)", len(translated))
-        send_ctrl_v(skip_wait=True)
+
+        # Skip Ctrl+V in remote mode (AnyDesk/TeamViewer don't support SendInput well)
+        remote_mode = config.get("remote_session_mode", False)
+        if not remote_mode:
+            send_ctrl_v(skip_wait=True)
+        else:
+            if hud:
+                hud.show_result(translated[:80], "✓ в буфере (удаленный режим)")
         if hud:
             hud.show_result(translated[:80])
         else:

@@ -333,7 +333,15 @@ def _start_recording(target_hwnd: int = 0):
 
             # ── Stage 4: paste & notify ──
             _pipe_set_status("Вставляю…")
-            pasted = _paste_into(target_hwnd, processed)
+
+            # Skip Ctrl+V in remote mode (AnyDesk/TeamViewer don't support SendInput well)
+            remote_mode = config.get("remote_session_mode", False)
+            if remote_mode:
+                set_clipboard_text(processed)
+                pasted = False
+                log.debug("Remote mode: clipboard only (no Ctrl+V)")
+            else:
+                pasted = _paste_into(target_hwnd, processed)
 
             # Play success sound + show toast for translation
             if choice["translate"]:
@@ -342,7 +350,7 @@ def _start_recording(target_hwnd: int = 0):
                 show_translation_toast(processed)
 
             preview = processed[:100] + ("…" if len(processed) > 100 else "")
-            label = "✓ вставлено" if pasted else "✓ в буфере"
+            label = "✓ вставлено" if pasted else "✓ в буфере" if not remote_mode else "✓ буфер"
             _get_hud().show_result(preview, label)
 
         except Exception as e:
